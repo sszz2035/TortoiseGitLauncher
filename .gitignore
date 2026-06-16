@@ -1,0 +1,26 @@
+# Build outputs
+bin/
+obj/
+dist/
+dist-v2/
+
+# Local .NET and NuGet caches created by build.ps1
+.dotnet/
+.nuget/
+
+# User and IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# OS files
+Thumbs.db
+Desktop.ini
