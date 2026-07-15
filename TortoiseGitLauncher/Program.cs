@@ -51,6 +51,7 @@ internal sealed class MainForm : Form
     private static readonly CommandButton[] CommandButtons =
     [
         new("提交", "commit", CommandScope.WorkingDirectory),
+        new("比较差异", "diff", CommandScope.WorkingDirectory),
         new("日志", "log", CommandScope.WorkingDirectory),
         new("同步", "sync", CommandScope.RepositoryRoot),
         new("拉取", "pull", CommandScope.RepositoryRoot),
@@ -68,7 +69,7 @@ internal sealed class MainForm : Form
 
     private static readonly CommandSection[] CommandSections =
     [
-        new("提交与更新", Color.FromArgb(59, 130, 246), ["提交", "拉取", "推送", "同步"]),
+        new("提交与更新", Color.FromArgb(59, 130, 246), ["提交", "比较差异", "拉取", "推送", "同步"]),
         new("管理工作区", Color.FromArgb(34, 197, 94), ["切换/检出", "合并", "清理", "仓库状态", "日志"]),
         new("处理更改", Color.FromArgb(168, 85, 247), ["还原", "解决冲突", "获取", "贮藏", "弹出贮藏"])
     ];
@@ -216,6 +217,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             BackColor = Color.Transparent,
             Margin = new Padding(0)
@@ -231,9 +233,30 @@ internal sealed class MainForm : Form
         }
 
         contentLayout.Controls.Add(CreateFooterCard());
+        contentLayout.Layout += (_, _) => SyncScrollPanelExtent(scrollPanel, contentLayout);
+        scrollPanel.SizeChanged += (_, _) => SyncScrollPanelExtent(scrollPanel, contentLayout);
+        SyncScrollPanelExtent(scrollPanel, contentLayout);
         scrollPanel.Controls.Add(contentLayout);
         return scrollPanel;
     }
+    private static void SyncScrollPanelExtent(Panel scrollPanel, Control content)
+    {
+        content.PerformLayout();
+        var contentHeight = content.GetPreferredSize(new Size(scrollPanel.ClientSize.Width, 0)).Height;
+        if (contentHeight <= 0)
+        {
+            contentHeight = content.Bottom;
+        }
+
+        scrollPanel.AutoScrollMinSize = new Size(0, contentHeight);
+        var maxScrollY = Math.Max(0, contentHeight - scrollPanel.ClientSize.Height);
+        var currentScrollY = Math.Max(0, -scrollPanel.AutoScrollPosition.Y);
+        if (currentScrollY > maxScrollY)
+        {
+            scrollPanel.AutoScrollPosition = new Point(0, maxScrollY);
+        }
+    }
+
     private Control CreatePageHeaderCard()
     {
         var card = CreateCardPanel(new Padding(22, 18, 22, 18));
@@ -477,6 +500,7 @@ internal sealed class MainForm : Form
             BackColor = Color.Transparent
         };
         flow.Layout += (_, _) => UpdateFlowPanelHeight(flow);
+        flow.SizeChanged += (_, _) => UpdateFlowPanelHeight(flow);
 
         foreach (var commandTitle in section.CommandTitles)
         {
@@ -497,7 +521,21 @@ internal sealed class MainForm : Form
 
     private static void UpdateFlowPanelHeight(FlowLayoutPanel flow)
     {
+        var availableWidth = flow.ClientSize.Width;
+        if (availableWidth <= 0)
+        {
+            availableWidth = flow.Width;
+        }
+
+        if (availableWidth <= 0)
+        {
+            return;
+        }
+
+        var rowWidth = 0;
+        var rowHeight = 0;
         var targetHeight = 0;
+
         foreach (Control control in flow.Controls)
         {
             if (!control.Visible)
@@ -505,9 +543,20 @@ internal sealed class MainForm : Form
                 continue;
             }
 
-            targetHeight = Math.Max(targetHeight, control.Bottom + control.Margin.Bottom);
+            var itemWidth = control.Width + control.Margin.Horizontal;
+            var itemHeight = control.Height + control.Margin.Vertical;
+            if (rowWidth > 0 && rowWidth + itemWidth > availableWidth)
+            {
+                targetHeight += rowHeight;
+                rowWidth = 0;
+                rowHeight = 0;
+            }
+
+            rowWidth += itemWidth;
+            rowHeight = Math.Max(rowHeight, itemHeight);
         }
 
+        targetHeight += rowHeight;
         if (targetHeight > 0 && flow.Height != targetHeight)
         {
             flow.Height = targetHeight;
@@ -570,6 +619,7 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FillColor = Color.White,
             BorderColor = Color.FromArgb(229, 235, 243),
             CornerRadius = 18,
@@ -672,6 +722,7 @@ internal sealed class MainForm : Form
     private static UiIconKind GetCommandIcon(string commandTitle) => commandTitle switch
     {
         "提交" => UiIconKind.Commit,
+        "比较差异" => UiIconKind.RepoStatus,
         "日志" => UiIconKind.RepoStatus,
         "同步" => UiIconKind.Sync,
         "拉取" => UiIconKind.Pull,
