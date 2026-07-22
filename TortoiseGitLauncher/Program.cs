@@ -324,11 +324,12 @@ internal sealed class MainForm : Form
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             AutoSize = true,
             Margin = new Padding(0, 0, 0, 12),
             BackColor = Color.Transparent
         };
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         titleRow.Controls.Add(CreateSmallIcon(UiIconKind.RepoFolder, Color.FromArgb(46, 118, 255), 18), 0, 0);
@@ -339,6 +340,17 @@ internal sealed class MainForm : Form
             Font = new Font("Microsoft YaHei UI", 11.5F, FontStyle.Bold, GraphicsUnit.Point),
             Margin = new Padding(8, 0, 0, 0)
         }, 1, 0);
+        var openRepositoryRootButton = CreateHeaderButton("打开根目录", Color.FromArgb(243, 247, 255));
+        openRepositoryRootButton.MinimumSize = new Size(128, 34);
+        openRepositoryRootButton.Padding = new Padding(9, 4, 9, 4);
+        openRepositoryRootButton.Margin = new Padding(14, 0, 0, 0);
+        openRepositoryRootButton.Image = IconFactory.Create(UiIconKind.RepoFolder, Color.FromArgb(59, 130, 246), 16);
+        openRepositoryRootButton.TextImageRelation = TextImageRelation.ImageBeforeText;
+        openRepositoryRootButton.ImageAlign = ContentAlignment.MiddleLeft;
+        openRepositoryRootButton.TextAlign = ContentAlignment.MiddleCenter;
+        openRepositoryRootButton.Click += (_, _) => OpenRepositoryRootInExplorer();
+        titleRow.Controls.Add(openRepositoryRootButton, 2, 0);
+
         layout.Controls.Add(titleRow, 0, 0);
 
         var selectionRow = new TableLayoutPanel
@@ -766,6 +778,54 @@ internal sealed class MainForm : Form
 
         var entry = UpsertRepositoryEntry(repoRoot, displayName: null, moveToTop: true);
         SelectRepositoryEntry(entry, "已切换仓库根目录。", moveToTop: false, saveImmediately: true);
+    }
+
+    private void OpenRepositoryRootInExplorer()
+    {
+        if (_selectedRepository is null)
+        {
+            SetStatus("当前未选择有效的仓库根目录。", isError: true);
+            MessageBox.Show(
+                "当前未选择有效的 Git 仓库根目录，请先从下拉框选择，或点“选择仓库目录”。",
+                "无法打开",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        var repoRootPath = _selectedRepository.RepoRootPath;
+        if (!Directory.Exists(repoRootPath))
+        {
+            SetStatus("当前仓库根目录不存在或暂时不可访问。", isError: true);
+            MessageBox.Show(
+                "当前选中的仓库根目录不存在或暂时不可访问，请先检查路径，或在“管理仓库列表”里删除该项。",
+                "路径不可用",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            UseShellExecute = true
+        };
+        startInfo.ArgumentList.Add(repoRootPath);
+
+        try
+        {
+            Process.Start(startInfo);
+            SetStatus($"已在文件资源管理器中打开仓库根目录: {repoRootPath}", isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"打开仓库根目录失败: {ex.Message}", isError: true);
+            MessageBox.Show(
+                $"无法在文件资源管理器中打开仓库根目录。\r\n\r\n{ex.Message}",
+                "打开失败",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private void OpenRepositoryManager()
