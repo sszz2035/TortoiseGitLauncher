@@ -14,6 +14,14 @@ internal sealed class ScriptRunnerPage : UserControl
     private bool _isUpdatingDirectoryComboBox;
     private Label _scriptConfigurationSummaryLabel = null!;
     private Label _scriptConfigurationStatusLabel = null!;
+    private FlowLayoutPanel _scriptButtonsPanel = null!;
+    private readonly ToolTip _scriptButtonToolTip = new()
+    {
+        AutoPopDelay = 12000,
+        InitialDelay = 350,
+        ReshowDelay = 150,
+        ShowAlways = true
+    };
 
     public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath)
     {
@@ -60,6 +68,16 @@ internal sealed class ScriptRunnerPage : UserControl
         {
             SetDirectoryStatus(loadWarning, isError: true);
         }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _scriptButtonToolTip.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     private Control CreateDirectoryCard()
@@ -184,7 +202,7 @@ internal sealed class ScriptRunnerPage : UserControl
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Color.Transparent
         };
         layout.Controls.Add(CreateSectionTitle(
@@ -218,30 +236,34 @@ internal sealed class ScriptRunnerPage : UserControl
         actionRow.Controls.Add(manageButton);
         layout.Controls.Add(actionRow, 0, 1);
 
-        var summaryPanel = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 76,
-            BackColor = Color.FromArgb(248, 250, 253),
-            Margin = new Padding(0)
-        };
-
         _scriptConfigurationSummaryLabel = new Label
         {
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.FromArgb(82, 91, 104)
+            AutoSize = true,
+            ForeColor = Color.FromArgb(82, 91, 104),
+            Margin = new Padding(0, 0, 0, 8)
         };
-        summaryPanel.Controls.Add(_scriptConfigurationSummaryLabel);
-        layout.Controls.Add(summaryPanel, 0, 2);
+        layout.Controls.Add(_scriptConfigurationSummaryLabel, 0, 2);
+
+        _scriptButtonsPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = false,
+            Height = 76,
+            WrapContents = true,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0)
+        };
+        _scriptButtonsPanel.Layout += (_, _) => UpdateScriptButtonPanelHeight();
+        _scriptButtonsPanel.SizeChanged += (_, _) => UpdateScriptButtonPanelHeight();
+        layout.Controls.Add(_scriptButtonsPanel, 0, 3);
 
         _scriptConfigurationStatusLabel = new Label
         {
             AutoSize = true,
             MaximumSize = new Size(1080, 0),
-            Margin = new Padding(0, 10, 0, 0)
+            Margin = new Padding(0, 4, 0, 0)
         };
-        layout.Controls.Add(_scriptConfigurationStatusLabel, 0, 3);
+        layout.Controls.Add(_scriptConfigurationStatusLabel, 0, 4);
 
         card.Controls.Add(layout);
         RefreshScriptConfigurationSummary();
@@ -298,22 +320,198 @@ internal sealed class ScriptRunnerPage : UserControl
 
     private void RefreshScriptConfigurationSummary()
     {
-        if (_scriptConfigurationSummaryLabel is null)
+        if (_scriptConfigurationSummaryLabel is null || _scriptButtonsPanel is null)
         {
             return;
         }
 
-        if (_settings.Scripts.Count == 0)
+        _scriptButtonsPanel.SuspendLayout();
+        try
         {
-            _scriptConfigurationSummaryLabel.Text = "尚未配置脚本";
+            foreach (Control existingControl in _scriptButtonsPanel.Controls.Cast<Control>().ToArray())
+            {
+                if (existingControl is Button { Image: not null } existingButton)
+                {
+                    existingButton.Image.Dispose();
+                    existingButton.Image = null;
+                }
+
+                existingControl.Dispose();
+            }
+
+            _scriptButtonsPanel.Controls.Clear();
+            if (_settings.Scripts.Count == 0)
+            {
+                _scriptConfigurationSummaryLabel.Text = "未配置脚本";
+                _scriptButtonsPanel.Controls.Add(new Label
+                {
+                    Text = "尚未配置脚本",
+                    AutoSize = false,
+                    Size = new Size(260, 64),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = Color.FromArgb(112, 120, 132),
+                    BackColor = Color.FromArgb(248, 250, 253),
+                    Margin = new Padding(0, 0, 14, 12)
+                });
+                return;
+            }
+
+            var invalidPathCount = _settings.Scripts.Count(configuration =>
+                !File.Exists(configuration.ScriptPath));
+            _scriptConfigurationSummaryLabel.Text = invalidPathCount == 0
+                ? $"已配置 {_settings.Scripts.Count} 个脚本"
+                : $"已配置 {_settings.Scripts.Count} 个脚本，其中 {invalidPathCount} 个路径无效";
+
+            foreach (var configuration in _settings.Scripts.OrderBy(item => item.DisplayOrder))
+            {
+                _scriptButtonsPanel.Controls.Add(CreateScriptButton(configuration));
+            }
+        }
+        finally
+        {
+            _scriptButtonsPanel.ResumeLayout(performLayout: true);
+            UpdateScriptButtonPanelHeight();
+        }
+    }
+
+    private Button CreateScriptButton(ScriptConfiguration configuration)
+    {
+        var scriptPathAvailable = File.Exists(configuration.ScriptPath);
+        var executionDirectoryAvailable = _selectedDirectory is not null &&
+                                          Directory.Exists(_selectedDirectory.DirectoryPath);
+        var isAvailable = scriptPathAvailable && executionDirectoryAvailable;
+        var button = new Button
+        {
+            Text = scriptPathAvailable
+                ? configuration.Name
+                : $"{configuration.Name}{Environment.NewLine}路径无效",
+            Size = new Size(222, 64),
+            Margin = new Padding(0, 0, 14, 12),
+            Padding = new Padding(12, 8, 12, 8),
+            Font = new Font("Microsoft YaHei UI", 10.3F, FontStyle.Bold, GraphicsUnit.Point),
+            TextAlign = ContentAlignment.MiddleCenter,
+            AutoEllipsis = true,
+            UseCompatibleTextRendering = true,
+            UseVisualStyleBackColor = false,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = scriptPathAvailable
+                ? Color.FromArgb(241, 249, 239)
+                : Color.FromArgb(251, 241, 239),
+            ForeColor = scriptPathAvailable
+                ? Color.FromArgb(36, 44, 58)
+                : Color.FromArgb(162, 55, 42),
+            Image = IconFactory.Create(
+                UiIconKind.ScriptRunner,
+                scriptPathAvailable
+                    ? Color.FromArgb(44, 137, 62)
+                    : Color.FromArgb(174, 82, 68),
+                18),
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            Enabled = isAvailable,
+            Tag = configuration
+        };
+
+        button.FlatAppearance.BorderColor = scriptPathAvailable
+            ? Color.FromArgb(207, 232, 202)
+            : Color.FromArgb(235, 205, 199);
+        button.FlatAppearance.BorderSize = 1;
+        button.Click += (_, _) => HandleScriptButtonClick(configuration);
+
+        var tooltipLines = new List<string>
+        {
+            configuration.Name,
+            configuration.ScriptPath,
+            ScriptConfigurationPathHelper.GetTypeDisplayName(configuration.ScriptType)
+        };
+        if (!string.IsNullOrWhiteSpace(configuration.Arguments))
+        {
+            tooltipLines.Add($"参数：{configuration.Arguments}");
+        }
+
+        if (!scriptPathAvailable)
+        {
+            tooltipLines.Add("脚本路径无效");
+        }
+        else if (!executionDirectoryAvailable)
+        {
+            tooltipLines.Add("当前执行目录不可用");
+        }
+
+        _scriptButtonToolTip.SetToolTip(button, string.Join(Environment.NewLine, tooltipLines));
+        return button;
+    }
+
+    private void HandleScriptButtonClick(ScriptConfiguration configuration)
+    {
+        if (!File.Exists(configuration.ScriptPath))
+        {
+            RefreshScriptConfigurationSummary();
+            SetScriptConfigurationStatus(
+                $"脚本“{configuration.Name}”的路径不存在或暂时不可访问。",
+                isError: true);
             return;
         }
 
-        var invalidPathCount = _settings.Scripts.Count(configuration =>
-            !File.Exists(configuration.ScriptPath));
-        _scriptConfigurationSummaryLabel.Text = invalidPathCount == 0
-            ? $"已配置 {_settings.Scripts.Count} 个脚本。"
-            : $"已配置 {_settings.Scripts.Count} 个脚本，其中 {invalidPathCount} 个路径无效。";
+        if (_selectedDirectory is null || !Directory.Exists(_selectedDirectory.DirectoryPath))
+        {
+            RefreshScriptConfigurationSummary();
+            SetScriptConfigurationStatus("当前执行目录不可用，请先选择有效目录。", isError: true);
+            return;
+        }
+
+        SetScriptConfigurationStatus(
+            $"已选择脚本“{configuration.Name}”，执行目录：{_selectedDirectory.DirectoryPath}",
+            isError: false);
+    }
+
+    private void UpdateScriptButtonPanelHeight()
+    {
+        if (_scriptButtonsPanel is null)
+        {
+            return;
+        }
+
+        var availableWidth = _scriptButtonsPanel.ClientSize.Width;
+        if (availableWidth <= 0)
+        {
+            availableWidth = _scriptButtonsPanel.Width;
+        }
+
+        if (availableWidth <= 0)
+        {
+            return;
+        }
+
+        var rowWidth = 0;
+        var rowHeight = 0;
+        var targetHeight = 0;
+        foreach (Control control in _scriptButtonsPanel.Controls)
+        {
+            if (!control.Visible)
+            {
+                continue;
+            }
+
+            var itemWidth = control.Width + control.Margin.Horizontal;
+            var itemHeight = control.Height + control.Margin.Vertical;
+            if (rowWidth > 0 && rowWidth + itemWidth > availableWidth)
+            {
+                targetHeight += rowHeight;
+                rowWidth = 0;
+                rowHeight = 0;
+            }
+
+            rowWidth += itemWidth;
+            rowHeight = Math.Max(rowHeight, itemHeight);
+        }
+
+        targetHeight += rowHeight;
+        targetHeight = Math.Max(76, targetHeight);
+        if (_scriptButtonsPanel.Height != targetHeight)
+        {
+            _scriptButtonsPanel.Height = targetHeight;
+        }
     }
 
     private void SetScriptConfigurationStatus(string message, bool isError)
@@ -466,6 +664,7 @@ internal sealed class ScriptRunnerPage : UserControl
         _settings.LastSelectedDirectoryPath = _selectedDirectory.DirectoryPath;
         _selectedDirectoryValue.Text = _selectedDirectory.DirectoryPath;
         RefreshDirectoryComboBox(_selectedDirectory.DirectoryPath);
+        RefreshScriptConfigurationSummary();
 
         if (saveImmediately && !PersistSettings())
         {
@@ -486,6 +685,7 @@ internal sealed class ScriptRunnerPage : UserControl
         _settings.LastSelectedDirectoryPath = string.Empty;
         _selectedDirectoryValue.Text = "未选择执行目录";
         RefreshDirectoryComboBox(selectedDirectoryPath: null);
+        RefreshScriptConfigurationSummary();
 
         if (saveImmediately && !PersistSettings())
         {
