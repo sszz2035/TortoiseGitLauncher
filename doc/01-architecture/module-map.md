@@ -11,6 +11,8 @@ TortoiseGitLauncher/
       ScriptConfiguration.cs
       ScriptConfigurationForm.cs
       ScriptConfigurationManagerForm.cs
+      ScriptProcessRunner.cs
+      ScriptRunInstance.cs
       ScriptRunnerPage.cs
       ScriptRunnerPathHelper.cs
       ScriptRunnerSettings.cs

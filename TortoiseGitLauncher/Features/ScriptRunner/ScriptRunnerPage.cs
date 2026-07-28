@@ -22,6 +22,10 @@ internal sealed class ScriptRunnerPage : UserControl
         ReshowDelay = 150,
         ShowAlways = true
     };
+    private readonly ScriptProcessRunner _scriptProcessRunner = new();
+    private readonly List<ScriptRunInstance> _runInstances = [];
+    private Label _runInstancesSummaryLabel = null!;
+    private ListBox _runInstancesListBox = null!;
 
     public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath)
     {
@@ -51,12 +55,7 @@ internal sealed class ScriptRunnerPage : UserControl
         contentLayout.Controls.Add(CreateHeaderCard());
         contentLayout.Controls.Add(CreateDirectoryCard());
         contentLayout.Controls.Add(CreateScriptConfigurationCard());
-        contentLayout.Controls.Add(CreatePlaceholderSectionCard(
-            "运行实例与输出",
-            UiIconKind.RepoStatus,
-            Color.FromArgb(168, 85, 247),
-            "暂无运行实例",
-            220));
+        contentLayout.Controls.Add(CreateRunInstancesCard());
 
         contentLayout.Layout += (_, _) => SyncScrollExtent(scrollPanel, contentLayout);
         scrollPanel.SizeChanged += (_, _) => SyncScrollExtent(scrollPanel, contentLayout);
@@ -74,6 +73,12 @@ internal sealed class ScriptRunnerPage : UserControl
     {
         if (disposing)
         {
+            foreach (var instance in _runInstances)
+            {
+                instance.StateChanged -= OnRunInstanceStateChanged;
+            }
+
+            _scriptProcessRunner.Dispose();
             _scriptButtonToolTip.Dispose();
         }
 
@@ -460,8 +465,24 @@ internal sealed class ScriptRunnerPage : UserControl
             return;
         }
 
+        var instance = _scriptProcessRunner.Start(
+            configuration,
+            _selectedDirectory.DirectoryPath);
+        _runInstances.Insert(0, instance);
+        instance.StateChanged += OnRunInstanceStateChanged;
+        RefreshRunInstancesList();
+
+        if (instance.State is ScriptRunState.StartFailed or ScriptRunState.Failed &&
+            !string.IsNullOrWhiteSpace(instance.ErrorMessage))
+        {
+            SetScriptConfigurationStatus(
+                $"脚本“{configuration.Name}”启动失败：{instance.ErrorMessage}",
+                isError: true);
+            return;
+        }
+
         SetScriptConfigurationStatus(
-            $"已选择脚本“{configuration.Name}”，执行目录：{_selectedDirectory.DirectoryPath}",
+            $"已启动脚本“{configuration.Name}”，实例 {instance.Id.ToString("N")[..8]}。",
             isError: false);
     }
 
@@ -853,6 +874,154 @@ internal sealed class ScriptRunnerPage : UserControl
         }
     }
 
+    private Control CreateRunInstancesCard()
+    {
+        var card = CreateCard(new Padding(20, 18, 20, 18));
+        card.Margin = new Padding(0, 0, 0, 14);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 3,
+            BackColor = Color.Transparent
+        };
+        layout.Controls.Add(CreateSectionTitle(
+            "运行实例",
+            UiIconKind.RepoStatus,
+            Color.FromArgb(168, 85, 247)), 0, 0);
+
+        _runInstancesSummaryLabel = new Label
+        {
+            Text = "暂无运行实例",
+            AutoSize = true,
+            ForeColor = Color.FromArgb(82, 91, 104),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        layout.Controls.Add(_runInstancesSummaryLabel, 0, 1);
+
+        _runInstancesListBox = new ListBox
+        {
+            Dock = DockStyle.Top,
+            Height = 190,
+            IntegralHeight = false,
+            HorizontalScrollbar = true,
+            FormattingEnabled = true,
+            BackColor = Color.FromArgb(248, 250, 253),
+            BorderStyle = BorderStyle.FixedSingle,
+            Margin = new Padding(0)
+        };
+        _runInstancesListBox.Format += (_, eventArgs) =>
+        {
+            if (eventArgs.ListItem is ScriptRunInstance instance)
+            {
+                eventArgs.Value = FormatRunInstance(instance);
+            }
+        };
+        layout.Controls.Add(_runInstancesListBox, 0, 2);
+
+        card.Controls.Add(layout);
+        RefreshRunInstancesList();
+        return card;
+    }
+
+    private void RefreshRunInstancesList()
+    {
+        if (IsDisposed || Disposing ||
+            _runInstancesSummaryLabel is null || _runInstancesListBox is null)
+        {
+            return;
+        }
+
+        var selectedId = _runInstancesListBox.SelectedItem is ScriptRunInstance selected
+            ? selected.Id
+            : (Guid?)null;
+
+        _runInstancesListBox.BeginUpdate();
+        try
+        {
+            _runInstancesListBox.Items.Clear();
+            foreach (var instance in _runInstances)
+            {
+                _runInstancesListBox.Items.Add(instance);
+            }
+        }
+        finally
+        {
+            _runInstancesListBox.EndUpdate();
+        }
+
+        var runningCount = _runInstances.Count(instance => instance.IsRunning);
+        _runInstancesSummaryLabel.Text = _runInstances.Count == 0
+            ? "暂无运行实例"
+            : $"共 {_runInstances.Count} 个实例，{runningCount} 个运行中";
+
+        if (selectedId.HasValue)
+        {
+            for (var index = 0; index < _runInstancesListBox.Items.Count; index++)
+            {
+                if (_runInstancesListBox.Items[index] is ScriptRunInstance instance &&
+                    instance.Id == selectedId.Value)
+                {
+                    _runInstancesListBox.SelectedIndex = index;
+                    break;
+                }
+            }
+        }
+        else if (_runInstancesListBox.Items.Count > 0)
+        {
+            _runInstancesListBox.SelectedIndex = 0;
+        }
+    }
+
+    private void OnRunInstanceStateChanged(object? sender, EventArgs eventArgs)
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated)
+        {
+            return;
+        }
+
+        if (InvokeRequired)
+        {
+            try
+            {
+                BeginInvoke((Action)RefreshRunInstancesList);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
+            return;
+        }
+
+        RefreshRunInstancesList();
+    }
+
+    private static string FormatRunInstance(ScriptRunInstance instance)
+    {
+        var stateText = ScriptRunInstance.GetStateDisplayName(instance.State);
+        var processText = instance.State switch
+        {
+            ScriptRunState.Running when instance.ProcessId.HasValue =>
+                $"PID {instance.ProcessId.Value}",
+            ScriptRunState.Succeeded or ScriptRunState.Failed when instance.ExitCode.HasValue =>
+                $"退出码 {instance.ExitCode.Value}",
+            ScriptRunState.StartFailed when !string.IsNullOrWhiteSpace(instance.ErrorMessage) =>
+                instance.ErrorMessage,
+            _ => string.Empty
+        };
+        var stateDetail = string.IsNullOrWhiteSpace(processText)
+            ? stateText
+            : $"{stateText}，{processText}";
+
+        return $"{instance.StartedAt:HH:mm:ss}  {instance.ScriptSnapshot.Name}  {stateDetail}  [{instance.WorkingDirectory}]";
+    }
+
     private static Control CreateHeaderCard()
     {
         var card = CreateCard(new Padding(22, 18, 22, 18));
@@ -902,46 +1071,6 @@ internal sealed class ScriptRunnerPage : UserControl
             Margin = new Padding(0)
         });
         layout.Controls.Add(textLayout, 1, 0);
-
-        card.Controls.Add(layout);
-        return card;
-    }
-
-    private static Control CreatePlaceholderSectionCard(
-        string title,
-        UiIconKind iconKind,
-        Color accentColor,
-        string emptyText,
-        int contentHeight)
-    {
-        var card = CreateCard(new Padding(20, 18, 20, 18));
-        card.Margin = new Padding(0, 0, 0, 14);
-
-        var layout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 1,
-            BackColor = Color.Transparent
-        };
-        layout.Controls.Add(CreateSectionTitle(title, iconKind, accentColor), 0, 0);
-
-        var emptyState = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = contentHeight,
-            BackColor = Color.FromArgb(248, 250, 253),
-            Margin = new Padding(0)
-        };
-        emptyState.Controls.Add(new Label
-        {
-            Text = emptyText,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.FromArgb(112, 120, 132)
-        });
-        layout.Controls.Add(emptyState, 0, 1);
 
         card.Controls.Add(layout);
         return card;
