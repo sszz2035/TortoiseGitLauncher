@@ -7,7 +7,11 @@ TortoiseGitLauncher/
   Program.cs
   Features/
     ScriptRunner/
+      ExecutionDirectoryManagerForm.cs
       ScriptRunnerPage.cs
+      ScriptRunnerPathHelper.cs
+      ScriptRunnerSettings.cs
+      ScriptRunnerStore.cs
   UI/
     MainForm.cs
     MainForm.RepositoryManagement.cs

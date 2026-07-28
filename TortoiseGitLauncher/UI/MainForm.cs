@@ -98,7 +98,7 @@ internal sealed partial class MainForm : Form
         shellLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
         shellLayout.Controls.Add(CreateSidebar(), 0, 0);
-        shellLayout.Controls.Add(CreatePageHost(), 1, 0);
+        shellLayout.Controls.Add(CreatePageHost(initialSelection?.RepoRootPath), 1, 0);
         Controls.Add(shellLayout);
 
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
@@ -182,7 +182,7 @@ internal sealed partial class MainForm : Form
         return sidebarCard;
     }
 
-    private Control CreatePageHost()
+    private Control CreatePageHost(string? initialRepositoryRootPath)
     {
         _pageHost = new Panel
         {
@@ -192,7 +192,7 @@ internal sealed partial class MainForm : Form
 
         _repositoryManagementPage = CreateRepositoryManagementPage();
         _repositoryManagementPage.Dock = DockStyle.Fill;
-        _scriptRunnerPage = new ScriptRunnerPage
+        _scriptRunnerPage = new ScriptRunnerPage(_launchDirectory, initialRepositoryRootPath)
         {
             Dock = DockStyle.Fill,
             Visible = false
