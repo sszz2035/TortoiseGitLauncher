@@ -170,6 +170,42 @@ internal sealed partial class MainForm : Form
         return sidebarCard;
     }
 
+    private static Button CreateSidebarButton(string text, UiIconKind iconKind, bool isActive)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Dock = DockStyle.Top,
+            Height = 56,
+            Margin = new Padding(0, 0, 0, 8),
+            Padding = new Padding(16, 8, 16, 8),
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold, GraphicsUnit.Point),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Image = IconFactory.Create(iconKind, Color.FromArgb(31, 41, 55), 18),
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            UseCompatibleTextRendering = true,
+            BackColor = isActive ? Color.FromArgb(219, 233, 252) : Color.White,
+            ForeColor = Color.FromArgb(25, 30, 40),
+            Enabled = true,
+            TabStop = false
+        };
+
+        button.FlatAppearance.BorderSize = 0;
+        return button;
+    }
+
+    private static PictureBox CreateIconBox(UiIconKind kind, Color color, int boxSize, Color backgroundColor) =>
+        new()
+        {
+            Size = new Size(boxSize, boxSize),
+            Image = IconFactory.Create(kind, color, Math.Max(18, boxSize - 18)),
+            SizeMode = PictureBoxSizeMode.CenterImage,
+            BackColor = backgroundColor,
+            Margin = new Padding(0)
+        };
+
     private Control CreateRepositoryManagementPage()
     {
         var scrollPanel = new Panel
