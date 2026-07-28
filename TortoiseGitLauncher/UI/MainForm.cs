@@ -5,6 +5,12 @@ namespace TortoiseGitLauncher;
 
 internal sealed partial class MainForm : Form
 {
+    private Panel _pageHost = null!;
+    private Button _repositoryNavigationButton = null!;
+    private Button _scriptRunnerNavigationButton = null!;
+    private Control _repositoryManagementPage = null!;
+    private ScriptRunnerPage _scriptRunnerPage = null!;
+
     private Label _selectedDirectoryValue = null!;
     private ComboBox _repoRootComboBox = null!;
     private Label _statusValue = null!;
@@ -92,7 +98,7 @@ internal sealed partial class MainForm : Form
         shellLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
         shellLayout.Controls.Add(CreateSidebar(), 0, 0);
-        shellLayout.Controls.Add(CreateRepositoryManagementPage(), 1, 0);
+        shellLayout.Controls.Add(CreatePageHost(), 1, 0);
         Controls.Add(shellLayout);
 
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
@@ -126,9 +132,10 @@ internal sealed partial class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 5,
             BackColor = Color.Transparent
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -155,19 +162,63 @@ internal sealed partial class MainForm : Form
         }, 1, 0);
 
         layout.Controls.Add(brandPanel, 0, 0);
-        layout.Controls.Add(CreateSidebarButton("仓库管理", UiIconKind.SidebarRepo, isActive: true), 0, 1);
-        layout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent }, 0, 2);
+        _repositoryNavigationButton = CreateSidebarButton("仓库管理", UiIconKind.SidebarRepo, isActive: true);
+        _scriptRunnerNavigationButton = CreateSidebarButton("脚本执行", UiIconKind.ScriptRunner, isActive: false);
+        _repositoryNavigationButton.Click += (_, _) => ShowPage(_repositoryManagementPage);
+        _scriptRunnerNavigationButton.Click += (_, _) => ShowPage(_scriptRunnerPage);
+        layout.Controls.Add(_repositoryNavigationButton, 0, 1);
+        layout.Controls.Add(_scriptRunnerNavigationButton, 0, 2);
+        layout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent }, 0, 3);
         layout.Controls.Add(new Label
         {
-            Text = "后续新增功能时，可以继续往这里扩展更多页面。",
+            Text = "仓库操作与自定义脚本集中管理。",
             AutoSize = true,
             MaximumSize = new Size(168, 0),
             ForeColor = Color.FromArgb(102, 110, 122),
             Margin = new Padding(4, 14, 4, 0)
-        }, 0, 3);
+        }, 0, 4);
 
         sidebarCard.Controls.Add(layout);
         return sidebarCard;
+    }
+
+    private Control CreatePageHost()
+    {
+        _pageHost = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.Transparent
+        };
+
+        _repositoryManagementPage = CreateRepositoryManagementPage();
+        _repositoryManagementPage.Dock = DockStyle.Fill;
+        _scriptRunnerPage = new ScriptRunnerPage
+        {
+            Dock = DockStyle.Fill,
+            Visible = false
+        };
+
+        _pageHost.Controls.Add(_scriptRunnerPage);
+        _pageHost.Controls.Add(_repositoryManagementPage);
+        return _pageHost;
+    }
+
+    private void ShowPage(Control page)
+    {
+        foreach (Control pageControl in _pageHost.Controls)
+        {
+            pageControl.Visible = ReferenceEquals(pageControl, page);
+        }
+
+        page.BringToFront();
+        SetSidebarButtonActive(_repositoryNavigationButton, ReferenceEquals(page, _repositoryManagementPage));
+        SetSidebarButtonActive(_scriptRunnerNavigationButton, ReferenceEquals(page, _scriptRunnerPage));
+    }
+
+    private static void SetSidebarButtonActive(Button button, bool isActive)
+    {
+        button.BackColor = isActive ? Color.FromArgb(219, 233, 252) : Color.White;
+        button.ForeColor = Color.FromArgb(25, 30, 40);
     }
 
     private static Button CreateSidebarButton(string text, UiIconKind iconKind, bool isActive)

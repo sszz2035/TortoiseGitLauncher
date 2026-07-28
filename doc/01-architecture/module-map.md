@@ -5,6 +5,9 @@
 ```text
 TortoiseGitLauncher/
   Program.cs
+  Features/
+    ScriptRunner/
+      ScriptRunnerPage.cs
   UI/
     MainForm.cs
     MainForm.RepositoryManagement.cs
@@ -27,6 +30,7 @@ TortoiseGitLauncher/
 | 模块 | 职责 |
 | --- | --- |
 | `Program.cs` | 进程入口、WinForms 初始化、顶层异常记录 |
+| `Features/ScriptRunner` | 脚本执行页面及后续配置、持久化和进程生命周期 |
 | `UI/MainForm.cs` | 应用外壳、导航和页面装配 |
 | `UI/MainForm.RepositoryManagement.cs` | 仓库管理页及 TortoiseGit 命令交互 |
 | `UI/RepositoryListManagerForm.cs` | 仓库列表编辑对话框 |

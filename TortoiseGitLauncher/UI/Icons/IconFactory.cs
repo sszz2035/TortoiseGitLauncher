@@ -7,6 +7,7 @@ internal enum UiIconKind
 {
     Brand,
     SidebarRepo,
+    ScriptRunner,
     RepoFolder,
     ChooseFolder,
     ManageList,
@@ -46,6 +47,9 @@ internal static class IconFactory
         {
             case UiIconKind.Brand:
                 DrawBrand(graphics, pen, brush, size);
+                break;
+            case UiIconKind.ScriptRunner:
+                DrawTerminal(graphics, pen, size);
                 break;
             case UiIconKind.SidebarRepo:
             case UiIconKind.RepoFolder:
@@ -97,6 +101,14 @@ internal static class IconFactory
 
         return bitmap;
     }
+    private static void DrawTerminal(Graphics g, Pen pen, int size)
+    {
+        g.DrawRectangle(pen, size * 0.14F, size * 0.20F, size * 0.72F, size * 0.60F);
+        g.DrawLine(pen, size * 0.28F, size * 0.38F, size * 0.40F, size * 0.50F);
+        g.DrawLine(pen, size * 0.40F, size * 0.50F, size * 0.28F, size * 0.62F);
+        g.DrawLine(pen, size * 0.50F, size * 0.64F, size * 0.70F, size * 0.64F);
+    }
+
     private static void DrawBrand(Graphics g, Pen pen, Brush brush, int size)
     {
         var p1 = new PointF(size * 0.28F, size * 0.32F);
