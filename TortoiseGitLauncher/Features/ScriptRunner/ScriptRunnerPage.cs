@@ -12,6 +12,8 @@ internal sealed class ScriptRunnerPage : UserControl
     private Label _directoryStatusLabel = null!;
     private ExecutionDirectoryEntry? _selectedDirectory;
     private bool _isUpdatingDirectoryComboBox;
+    private Label _scriptConfigurationSummaryLabel = null!;
+    private Label _scriptConfigurationStatusLabel = null!;
 
     public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath)
     {
@@ -40,12 +42,7 @@ internal sealed class ScriptRunnerPage : UserControl
 
         contentLayout.Controls.Add(CreateHeaderCard());
         contentLayout.Controls.Add(CreateDirectoryCard());
-        contentLayout.Controls.Add(CreatePlaceholderSectionCard(
-            "脚本按钮",
-            UiIconKind.ScriptRunner,
-            Color.FromArgb(34, 197, 94),
-            "尚未配置脚本",
-            92));
+        contentLayout.Controls.Add(CreateScriptConfigurationCard());
         contentLayout.Controls.Add(CreatePlaceholderSectionCard(
             "运行实例与输出",
             UiIconKind.RepoStatus,
@@ -176,6 +173,156 @@ internal sealed class ScriptRunnerPage : UserControl
         return card;
     }
 
+    private Control CreateScriptConfigurationCard()
+    {
+        var card = CreateCard(new Padding(20, 18, 20, 18));
+        card.Margin = new Padding(0, 0, 0, 14);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 4,
+            BackColor = Color.Transparent
+        };
+        layout.Controls.Add(CreateSectionTitle(
+            "脚本按钮",
+            UiIconKind.ScriptRunner,
+            Color.FromArgb(34, 137, 74)), 0, 0);
+
+        var actionRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0, 0, 0, 12)
+        };
+
+        var createButton = CreateActionButton(
+            "新建脚本",
+            UiIconKind.ScriptRunner,
+            Color.FromArgb(34, 137, 74),
+            Color.FromArgb(237, 247, 240));
+        createButton.Margin = new Padding(0, 0, 10, 0);
+        createButton.Click += (_, _) => CreateScriptConfiguration();
+        actionRow.Controls.Add(createButton);
+
+        var manageButton = CreateActionButton(
+            "管理脚本",
+            UiIconKind.ManageList,
+            Color.FromArgb(90, 99, 112),
+            Color.FromArgb(245, 248, 242));
+        manageButton.Click += (_, _) => OpenScriptConfigurationManager();
+        actionRow.Controls.Add(manageButton);
+        layout.Controls.Add(actionRow, 0, 1);
+
+        var summaryPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 76,
+            BackColor = Color.FromArgb(248, 250, 253),
+            Margin = new Padding(0)
+        };
+
+        _scriptConfigurationSummaryLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(82, 91, 104)
+        };
+        summaryPanel.Controls.Add(_scriptConfigurationSummaryLabel);
+        layout.Controls.Add(summaryPanel, 0, 2);
+
+        _scriptConfigurationStatusLabel = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(1080, 0),
+            Margin = new Padding(0, 10, 0, 0)
+        };
+        layout.Controls.Add(_scriptConfigurationStatusLabel, 0, 3);
+
+        card.Controls.Add(layout);
+        RefreshScriptConfigurationSummary();
+        return card;
+    }
+
+    private void CreateScriptConfiguration()
+    {
+        using var dialog = new ScriptConfigurationForm();
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.ResultConfiguration is null)
+        {
+            return;
+        }
+
+        var configuration = dialog.ResultConfiguration;
+        configuration.DisplayOrder = _settings.Scripts.Count;
+        _settings.Scripts.Add(configuration);
+        if (!PersistSettings(_scriptConfigurationStatusLabel))
+        {
+            _settings.Scripts.Remove(configuration);
+            RefreshScriptConfigurationSummary();
+            return;
+        }
+
+        RefreshScriptConfigurationSummary();
+        SetScriptConfigurationStatus($"已创建脚本配置“{configuration.Name}”。", isError: false);
+    }
+
+    private void OpenScriptConfigurationManager()
+    {
+        using var dialog = new ScriptConfigurationManagerForm(_settings.Scripts);
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var previousConfigurations = _settings.Scripts
+            .Select(configuration => configuration.Clone())
+            .ToList();
+        _settings.Scripts.Clear();
+        _settings.Scripts.AddRange(dialog.GetConfigurations());
+
+        if (!PersistSettings(_scriptConfigurationStatusLabel))
+        {
+            _settings.Scripts.Clear();
+            _settings.Scripts.AddRange(previousConfigurations);
+            RefreshScriptConfigurationSummary();
+            return;
+        }
+
+        RefreshScriptConfigurationSummary();
+        SetScriptConfigurationStatus("已保存脚本配置修改。", isError: false);
+    }
+
+    private void RefreshScriptConfigurationSummary()
+    {
+        if (_scriptConfigurationSummaryLabel is null)
+        {
+            return;
+        }
+
+        if (_settings.Scripts.Count == 0)
+        {
+            _scriptConfigurationSummaryLabel.Text = "尚未配置脚本";
+            return;
+        }
+
+        var invalidPathCount = _settings.Scripts.Count(configuration =>
+            !File.Exists(configuration.ScriptPath));
+        _scriptConfigurationSummaryLabel.Text = invalidPathCount == 0
+            ? $"已配置 {_settings.Scripts.Count} 个脚本。"
+            : $"已配置 {_settings.Scripts.Count} 个脚本，其中 {invalidPathCount} 个路径无效。";
+    }
+
+    private void SetScriptConfigurationStatus(string message, bool isError)
+    {
+        _scriptConfigurationStatusLabel.Text = message;
+        _scriptConfigurationStatusLabel.ForeColor = isError
+            ? Color.FromArgb(180, 45, 30)
+            : Color.FromArgb(23, 112, 41);
+    }
     private void InitializeDirectorySelection(string? initialRepositoryRootPath, bool persistSelection)
     {
         ExecutionDirectoryEntry? entry = null;
@@ -451,14 +598,24 @@ internal sealed class ScriptRunnerPage : UserControl
         }
     }
 
-    private bool PersistSettings()
+    private bool PersistSettings(Label? statusLabel = null)
     {
         if (ScriptRunnerStore.TrySave(_settings, out var errorMessage))
         {
             return true;
         }
 
-        SetDirectoryStatus($"保存脚本执行配置失败：{errorMessage}", isError: true);
+        var statusMessage = $"保存脚本执行配置失败：{errorMessage}";
+        if (statusLabel is null)
+        {
+            SetDirectoryStatus(statusMessage, isError: true);
+        }
+        else
+        {
+            statusLabel.Text = statusMessage;
+            statusLabel.ForeColor = Color.FromArgb(180, 45, 30);
+        }
+
         MessageBox.Show(
             this,
             $"无法保存脚本执行配置。{Environment.NewLine}{Environment.NewLine}{errorMessage}",

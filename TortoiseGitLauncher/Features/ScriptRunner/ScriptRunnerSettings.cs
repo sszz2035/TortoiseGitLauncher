@@ -4,13 +4,15 @@ namespace TortoiseGitLauncher;
 
 internal sealed class ScriptRunnerSettings
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public int Version { get; set; } = CurrentVersion;
 
     public List<ExecutionDirectoryEntry> RecentDirectories { get; set; } = [];
 
     public string LastSelectedDirectoryPath { get; set; } = string.Empty;
+
+    public List<ScriptConfiguration> Scripts { get; set; } = [];
 }
 
 internal sealed class ExecutionDirectoryEntry

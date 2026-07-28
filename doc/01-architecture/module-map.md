@@ -8,6 +8,9 @@ TortoiseGitLauncher/
   Features/
     ScriptRunner/
       ExecutionDirectoryManagerForm.cs
+      ScriptConfiguration.cs
+      ScriptConfigurationForm.cs
+      ScriptConfigurationManagerForm.cs
       ScriptRunnerPage.cs
       ScriptRunnerPathHelper.cs
       ScriptRunnerSettings.cs
