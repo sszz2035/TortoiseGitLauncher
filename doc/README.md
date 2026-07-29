@@ -14,6 +14,7 @@
 - `03-ui/layout-guidelines.md`：WinForms 布局规则和避坑
 - `03-ui/visual-guidelines.md`：视觉风格和控件规范
 - `04-data/repository-history.md`：仓库历史数据结构
+- `04-data/script-runner-settings.md`：脚本执行配置数据结构
 - `05-build-release/build-and-release.md`：构建和发布说明
 - `06-maintenance/known-issues.md`：已知问题和修复记录
 - `06-maintenance/codex-maintenance-guide.md`：给后续 Codex 的维护说明

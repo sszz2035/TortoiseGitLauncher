@@ -7,10 +7,12 @@ internal enum UiIconKind
 {
     Brand,
     SidebarRepo,
+    ScriptRunner,
     RepoFolder,
     ChooseFolder,
     ManageList,
     Info,
+    Stop,
     Commit,
     Pull,
     Push,
@@ -47,6 +49,9 @@ internal static class IconFactory
             case UiIconKind.Brand:
                 DrawBrand(graphics, pen, brush, size);
                 break;
+            case UiIconKind.ScriptRunner:
+                DrawTerminal(graphics, pen, size);
+                break;
             case UiIconKind.SidebarRepo:
             case UiIconKind.RepoFolder:
                 DrawFolder(graphics, pen, brush, size);
@@ -60,6 +65,9 @@ internal static class IconFactory
                 break;
             case UiIconKind.Info:
                 DrawInfo(graphics, pen, brush, size);
+                break;
+            case UiIconKind.Stop:
+                DrawStop(graphics, brush, size);
                 break;
             case UiIconKind.Commit:
                 DrawCommit(graphics, pen, brush, size);
@@ -97,6 +105,14 @@ internal static class IconFactory
 
         return bitmap;
     }
+    private static void DrawTerminal(Graphics g, Pen pen, int size)
+    {
+        g.DrawRectangle(pen, size * 0.14F, size * 0.20F, size * 0.72F, size * 0.60F);
+        g.DrawLine(pen, size * 0.28F, size * 0.38F, size * 0.40F, size * 0.50F);
+        g.DrawLine(pen, size * 0.40F, size * 0.50F, size * 0.28F, size * 0.62F);
+        g.DrawLine(pen, size * 0.50F, size * 0.64F, size * 0.70F, size * 0.64F);
+    }
+
     private static void DrawBrand(Graphics g, Pen pen, Brush brush, int size)
     {
         var p1 = new PointF(size * 0.28F, size * 0.32F);
@@ -134,6 +150,16 @@ internal static class IconFactory
         g.DrawEllipse(pen, size * 0.18F, size * 0.18F, size * 0.64F, size * 0.64F);
         g.FillEllipse(brush, size * 0.46F, size * 0.30F, size * 0.08F, size * 0.08F);
         g.DrawLine(pen, size * 0.50F, size * 0.42F, size * 0.50F, size * 0.66F);
+    }
+
+    private static void DrawStop(Graphics g, Brush brush, int size)
+    {
+        g.FillRectangle(
+            brush,
+            size * 0.28F,
+            size * 0.28F,
+            size * 0.44F,
+            size * 0.44F);
     }
 
     private static void DrawCommit(Graphics g, Pen pen, Brush brush, int size)
