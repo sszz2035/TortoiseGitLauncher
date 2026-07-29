@@ -12,6 +12,7 @@ internal enum UiIconKind
     ChooseFolder,
     ManageList,
     Info,
+    Stop,
     Commit,
     Pull,
     Push,
@@ -64,6 +65,9 @@ internal static class IconFactory
                 break;
             case UiIconKind.Info:
                 DrawInfo(graphics, pen, brush, size);
+                break;
+            case UiIconKind.Stop:
+                DrawStop(graphics, brush, size);
                 break;
             case UiIconKind.Commit:
                 DrawCommit(graphics, pen, brush, size);
@@ -146,6 +150,16 @@ internal static class IconFactory
         g.DrawEllipse(pen, size * 0.18F, size * 0.18F, size * 0.64F, size * 0.64F);
         g.FillEllipse(brush, size * 0.46F, size * 0.30F, size * 0.08F, size * 0.08F);
         g.DrawLine(pen, size * 0.50F, size * 0.42F, size * 0.50F, size * 0.66F);
+    }
+
+    private static void DrawStop(Graphics g, Brush brush, int size)
+    {
+        g.FillRectangle(
+            brush,
+            size * 0.28F,
+            size * 0.28F,
+            size * 0.44F,
+            size * 0.44F);
     }
 
     private static void DrawCommit(Graphics g, Pen pen, Brush brush, int size)

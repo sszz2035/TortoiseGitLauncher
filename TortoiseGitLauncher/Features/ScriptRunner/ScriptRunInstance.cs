@@ -4,6 +4,7 @@ internal enum ScriptRunState
 {
     Starting,
     Running,
+    Stopping,
     Succeeded,
     Failed,
     Stopped,
@@ -114,7 +115,9 @@ internal sealed class ScriptRunInstance
         }
     }
 
-    public bool IsRunning => State is ScriptRunState.Starting or ScriptRunState.Running;
+    public bool IsRunning => State is ScriptRunState.Starting or ScriptRunState.Running or ScriptRunState.Stopping;
+
+    public bool CanStop => State is ScriptRunState.Starting or ScriptRunState.Running;
 
     public long OutputVersion
     {
@@ -174,6 +177,21 @@ internal sealed class ScriptRunInstance
         RaiseStateChanged(changed);
     }
 
+    internal void MarkStopping()
+    {
+        var changed = false;
+        lock (_syncRoot)
+        {
+            if (_state is ScriptRunState.Starting or ScriptRunState.Running)
+            {
+                _state = ScriptRunState.Stopping;
+                changed = true;
+            }
+        }
+
+        RaiseStateChanged(changed);
+    }
+
     internal void MarkExited(int exitCode)
     {
         var changed = false;
@@ -215,7 +233,7 @@ internal sealed class ScriptRunInstance
         var changed = false;
         lock (_syncRoot)
         {
-            if (_state is ScriptRunState.Starting or ScriptRunState.Running)
+            if (_state is ScriptRunState.Starting or ScriptRunState.Running or ScriptRunState.Stopping)
             {
                 _errorMessage = errorMessage;
                 _endedAt = DateTimeOffset.Now;
@@ -227,13 +245,14 @@ internal sealed class ScriptRunInstance
         RaiseStateChanged(changed);
     }
 
-    internal void MarkStopped()
+    internal void MarkStopped(int? exitCode = null)
     {
         var changed = false;
         lock (_syncRoot)
         {
-            if (_state is ScriptRunState.Starting or ScriptRunState.Running)
+            if (_state is ScriptRunState.Starting or ScriptRunState.Running or ScriptRunState.Stopping)
             {
+                _exitCode = exitCode;
                 _endedAt = DateTimeOffset.Now;
                 _state = ScriptRunState.Stopped;
                 changed = true;
@@ -248,6 +267,7 @@ internal sealed class ScriptRunInstance
         {
             ScriptRunState.Starting => "正在启动",
             ScriptRunState.Running => "运行中",
+            ScriptRunState.Stopping => "正在终止",
             ScriptRunState.Succeeded => "成功",
             ScriptRunState.Failed => "失败",
             ScriptRunState.Stopped => "已停止",

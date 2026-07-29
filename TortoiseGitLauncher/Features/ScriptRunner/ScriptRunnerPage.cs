@@ -26,9 +26,8 @@ internal sealed class ScriptRunnerPage : UserControl
     private readonly ScriptProcessRunner _scriptProcessRunner = new();
     private readonly List<ScriptRunInstance> _runInstances = [];
     private Label _runInstancesSummaryLabel = null!;
-    private ListBox _runInstancesListBox = null!;
-    private Label _selectedRunInstanceDetailsLabel = null!;
-    private RichTextBox _runOutputTextBox = null!;
+    private TabControl _runInstancesTabControl = null!;
+    private readonly Dictionary<Guid, RunInstanceTabView> _runInstanceTabViews = [];
     private readonly System.Windows.Forms.Timer _runUiRefreshTimer = new()
     {
         Interval = 250
@@ -486,7 +485,7 @@ internal sealed class ScriptRunnerPage : UserControl
             _selectedDirectory.DirectoryPath);
         _runInstances.Insert(0, instance);
         instance.StateChanged += OnRunInstanceStateChanged;
-        RefreshRunInstancesList();
+        RefreshRunInstanceTabs(instance.Id);
 
         if (instance.State is ScriptRunState.StartFailed or ScriptRunState.Failed &&
             !string.IsNullOrWhiteSpace(instance.ErrorMessage))
@@ -918,61 +917,149 @@ internal sealed class ScriptRunnerPage : UserControl
         };
         layout.Controls.Add(_runInstancesSummaryLabel, 0, 1);
 
-        var contentLayout = new TableLayoutPanel
+        _runInstancesTabControl = new TabControl
         {
             Dock = DockStyle.Top,
-            Height = 330,
-            ColumnCount = 2,
-            RowCount = 1,
-            BackColor = Color.Transparent,
+            Height = 360,
+            Alignment = TabAlignment.Bottom,
+            HotTrack = true,
+            Multiline = false,
+            ShowToolTips = true,
+            SizeMode = TabSizeMode.Normal,
+            Padding = new Point(12, 5),
             Margin = new Padding(0)
         };
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38F));
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62F));
-
-        _runInstancesListBox = new ListBox
+        _runInstancesTabControl.SelectedIndexChanged += (_, _) =>
         {
-            Dock = DockStyle.Fill,
-            IntegralHeight = false,
-            HorizontalScrollbar = true,
-            FormattingEnabled = true,
-            BackColor = Color.FromArgb(248, 250, 253),
-            BorderStyle = BorderStyle.FixedSingle,
-            Margin = new Padding(0, 0, 12, 0)
-        };
-        _runInstancesListBox.Format += (_, eventArgs) =>
-        {
-            if (eventArgs.ListItem is ScriptRunInstance instance)
-            {
-                eventArgs.Value = FormatRunInstance(instance);
-            }
-        };
-        _runInstancesListBox.SelectedIndexChanged += (_, _) =>
+            ResetRenderedOutputState();
             RefreshSelectedRunInstanceOutput(force: true);
-        contentLayout.Controls.Add(_runInstancesListBox, 0, 0);
+        };
+        layout.Controls.Add(_runInstancesTabControl, 0, 2);
 
-        var outputLayout = new TableLayoutPanel
+        card.Controls.Add(layout);
+        RefreshRunInstanceTabs();
+        RefreshSelectedRunInstanceOutput(force: true);
+        return card;
+    }
+
+    private void RefreshRunInstanceTabs(Guid? selectedInstanceId = null)
+    {
+        if (IsDisposed || Disposing ||
+            _runInstancesSummaryLabel is null || _runInstancesTabControl is null)
+        {
+            return;
+        }
+
+        var previousId =
+            _runInstancesTabControl.SelectedTab?.Tag is ScriptRunInstance selected
+                ? selected.Id
+                : (Guid?)null;
+
+        for (var index = 0; index < _runInstances.Count; index++)
+        {
+            var instance = _runInstances[index];
+            if (!_runInstanceTabViews.TryGetValue(instance.Id, out var view))
+            {
+                view = CreateRunInstanceTabView(instance);
+                _runInstanceTabViews.Add(instance.Id, view);
+                _runInstancesTabControl.TabPages.Insert(
+                    Math.Min(index, _runInstancesTabControl.TabPages.Count),
+                    view.TabPage);
+            }
+
+            UpdateRunInstanceTab(instance, view);
+        }
+
+        var runningCount = _runInstances.Count(instance => instance.IsRunning);
+        _runInstancesSummaryLabel.Text = _runInstances.Count == 0
+            ? "暂无运行实例"
+            : $"共 {_runInstances.Count} 个实例，{runningCount} 个运行中";
+
+        var targetId = selectedInstanceId ?? previousId;
+        if (targetId.HasValue &&
+            _runInstanceTabViews.TryGetValue(targetId.Value, out var targetView))
+        {
+            _runInstancesTabControl.SelectedTab = targetView.TabPage;
+        }
+        else if (_runInstancesTabControl.SelectedTab is null &&
+                 _runInstancesTabControl.TabPages.Count > 0)
+        {
+            _runInstancesTabControl.SelectedIndex = 0;
+        }
+    }
+
+    private RunInstanceTabView CreateRunInstanceTabView(ScriptRunInstance instance)
+    {
+        var tabPage = new TabPage
+        {
+            Tag = instance,
+            BackColor = Color.White,
+            UseVisualStyleBackColor = false,
+            Padding = new Padding(10)
+        };
+        var pageLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 2,
-            BackColor = Color.Transparent,
-            Margin = new Padding(12, 0, 0, 0)
+            BackColor = Color.White,
+            Margin = new Padding(0)
         };
-        outputLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        outputLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        pageLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        pageLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-        _selectedRunInstanceDetailsLabel = new Label
+        var detailsLayout = new TableLayoutPanel
         {
-            Text = "未选择运行实例",
+            Dock = DockStyle.Top,
             AutoSize = true,
-            MaximumSize = new Size(680, 0),
-            ForeColor = Color.FromArgb(82, 91, 104),
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8)
         };
-        outputLayout.Controls.Add(_selectedRunInstanceDetailsLabel, 0, 0);
+        detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        _runOutputTextBox = new RichTextBox
+        var detailsLabel = new Label
+        {
+            Text = "正在读取运行实例信息",
+            AutoSize = true,
+            MaximumSize = new Size(1080, 0),
+            ForeColor = Color.FromArgb(82, 91, 104),
+            Margin = new Padding(0, 3, 12, 0)
+        };
+        detailsLayout.Controls.Add(detailsLabel, 0, 0);
+
+        var stopButton = new Button
+        {
+            Text = "终止",
+            Width = 104,
+            Height = 32,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(255, 245, 245),
+            ForeColor = Color.FromArgb(174, 38, 38),
+            Font = new Font(
+                "Microsoft YaHei UI",
+                9F,
+                FontStyle.Regular,
+                GraphicsUnit.Point),
+            Image = IconFactory.Create(
+                UiIconKind.Stop,
+                Color.FromArgb(185, 40, 40),
+                15),
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextAlign = ContentAlignment.MiddleCenter,
+            UseCompatibleTextRendering = true,
+            Margin = new Padding(0)
+        };
+        stopButton.FlatAppearance.BorderColor = Color.FromArgb(239, 190, 190);
+        stopButton.Click += (_, _) => StopRunInstance(instance);
+        detailsLayout.Controls.Add(stopButton, 1, 0);
+        pageLayout.Controls.Add(detailsLayout, 0, 0);
+
+        var outputTextBox = new RichTextBox
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
@@ -985,90 +1072,38 @@ internal sealed class ScriptRunnerPage : UserControl
             Font = new Font("Consolas", 9.5F, FontStyle.Regular, GraphicsUnit.Point),
             Margin = new Padding(0)
         };
-        outputLayout.Controls.Add(_runOutputTextBox, 0, 1);
-        contentLayout.Controls.Add(outputLayout, 1, 0);
-        layout.Controls.Add(contentLayout, 0, 2);
+        pageLayout.Controls.Add(outputTextBox, 0, 1);
+        tabPage.Controls.Add(pageLayout);
 
-        card.Controls.Add(layout);
-        RefreshRunInstancesList();
-        RefreshSelectedRunInstanceOutput(force: true);
-        return card;
+        return new RunInstanceTabView(
+            tabPage,
+            detailsLabel,
+            stopButton,
+            outputTextBox);
     }
 
-    private void RefreshRunInstancesList()
+    private static void UpdateRunInstanceTab(
+        ScriptRunInstance instance,
+        RunInstanceTabView view)
     {
-        if (IsDisposed || Disposing ||
-            _runInstancesSummaryLabel is null || _runInstancesListBox is null)
-        {
-            return;
-        }
-
-        var selectedId = _runInstancesListBox.SelectedItem is ScriptRunInstance selected
-            ? selected.Id
-            : (Guid?)null;
-
-        _runInstancesListBox.BeginUpdate();
-        try
-        {
-            _runInstancesListBox.Items.Clear();
-            foreach (var instance in _runInstances)
-            {
-                _runInstancesListBox.Items.Add(instance);
-            }
-        }
-        finally
-        {
-            _runInstancesListBox.EndUpdate();
-        }
-
-        var runningCount = _runInstances.Count(instance => instance.IsRunning);
-        _runInstancesSummaryLabel.Text = _runInstances.Count == 0
-            ? "暂无运行实例"
-            : $"共 {_runInstances.Count} 个实例，{runningCount} 个运行中";
-
-        var restoredSelection = false;
-        if (selectedId.HasValue)
-        {
-            for (var index = 0; index < _runInstancesListBox.Items.Count; index++)
-            {
-                if (_runInstancesListBox.Items[index] is ScriptRunInstance instance &&
-                    instance.Id == selectedId.Value)
-                {
-                    _runInstancesListBox.SelectedIndex = index;
-                    restoredSelection = true;
-                    break;
-                }
-            }
-        }
-
-        if (!restoredSelection && _runInstancesListBox.Items.Count > 0)
-        {
-            _runInstancesListBox.SelectedIndex = 0;
-        }
+        view.TabPage.Text = FormatRunInstanceTab(instance);
+        view.TabPage.ToolTipText = FormatRunInstance(instance);
+        view.StopButton.Enabled = instance.CanStop;
+        view.StopButton.Text = instance.State == ScriptRunState.Stopping
+            ? "正在终止"
+            : "终止";
     }
 
     private void RefreshSelectedRunInstanceOutput(bool force)
     {
         if (IsDisposed || Disposing ||
-            _selectedRunInstanceDetailsLabel is null || _runOutputTextBox is null)
+            !TryGetSelectedRunInstanceView(out var instance, out var view))
         {
-            return;
-        }
-
-        if (_runInstancesListBox.SelectedItem is not ScriptRunInstance instance)
-        {
-            _selectedRunInstanceDetailsLabel.Text = "未选择运行实例";
-            _selectedRunInstanceDetailsLabel.ForeColor = Color.FromArgb(82, 91, 104);
-            if (_runOutputTextBox.TextLength > 0)
-            {
-                _runOutputTextBox.Clear();
-            }
-
             ResetRenderedOutputState();
             return;
         }
 
-        UpdateSelectedRunInstanceDetails(instance);
+        UpdateSelectedRunInstanceDetails(instance, view);
         var outputVersion = instance.OutputVersion;
         if (!force &&
             _renderedOutputInstanceId == instance.Id &&
@@ -1077,6 +1112,7 @@ internal sealed class ScriptRunnerPage : UserControl
             return;
         }
 
+        var outputTextBox = view.OutputTextBox;
         var snapshot = instance.GetOutputSnapshot();
         var lines = snapshot.Lines;
         var firstSequence = lines.Count > 0 ? lines[0].Sequence : 0;
@@ -1087,17 +1123,17 @@ internal sealed class ScriptRunnerPage : UserControl
         var rebuildOutput = force || selectedInstanceChanged || bufferWasTrimmed;
 
         var shouldScrollToEnd = force ||
-                                _runOutputTextBox.TextLength == 0 ||
-                                _runOutputTextBox.SelectionStart >=
-                                Math.Max(0, _runOutputTextBox.TextLength - 1);
-        var previousSelectionStart = _runOutputTextBox.SelectionStart;
-        var previousSelectionLength = _runOutputTextBox.SelectionLength;
+                                outputTextBox.TextLength == 0 ||
+                                outputTextBox.SelectionStart >=
+                                Math.Max(0, outputTextBox.TextLength - 1);
+        var previousSelectionStart = outputTextBox.SelectionStart;
+        var previousSelectionLength = outputTextBox.SelectionLength;
 
         if (lines.Count == 0)
         {
-            if (rebuildOutput || _runOutputTextBox.TextLength > 0)
+            if (rebuildOutput || outputTextBox.TextLength > 0)
             {
-                _runOutputTextBox.Clear();
+                outputTextBox.Clear();
             }
 
             _renderedOutputFirstSequence = 0;
@@ -1105,7 +1141,7 @@ internal sealed class ScriptRunnerPage : UserControl
         }
         else if (rebuildOutput)
         {
-            _runOutputTextBox.Text = BuildOutputText(snapshot);
+            outputTextBox.Text = BuildOutputText(snapshot);
             _renderedOutputFirstSequence = firstSequence;
             _renderedOutputLastSequence = lines[^1].Sequence;
         }
@@ -1116,7 +1152,7 @@ internal sealed class ScriptRunnerPage : UserControl
                 .ToArray();
             if (appendedLines.Length > 0)
             {
-                _runOutputTextBox.AppendText(BuildOutputText(appendedLines));
+                outputTextBox.AppendText(BuildOutputText(appendedLines));
                 _renderedOutputLastSequence = appendedLines[^1].Sequence;
             }
 
@@ -1130,22 +1166,24 @@ internal sealed class ScriptRunnerPage : UserControl
         _renderedOutputVersion = snapshot.Version;
         if (shouldScrollToEnd)
         {
-            _runOutputTextBox.SelectionStart = _runOutputTextBox.TextLength;
-            _runOutputTextBox.SelectionLength = 0;
-            _runOutputTextBox.ScrollToCaret();
+            outputTextBox.SelectionStart = outputTextBox.TextLength;
+            outputTextBox.SelectionLength = 0;
+            outputTextBox.ScrollToCaret();
         }
         else
         {
-            _runOutputTextBox.SelectionStart = Math.Min(
+            outputTextBox.SelectionStart = Math.Min(
                 previousSelectionStart,
-                _runOutputTextBox.TextLength);
-            _runOutputTextBox.SelectionLength = Math.Min(
+                outputTextBox.TextLength);
+            outputTextBox.SelectionLength = Math.Min(
                 previousSelectionLength,
-                _runOutputTextBox.TextLength - _runOutputTextBox.SelectionStart);
+                outputTextBox.TextLength - outputTextBox.SelectionStart);
         }
     }
 
-    private void UpdateSelectedRunInstanceDetails(ScriptRunInstance instance)
+    private static void UpdateSelectedRunInstanceDetails(
+        ScriptRunInstance instance,
+        RunInstanceTabView view)
     {
         var state = instance.State;
         var endedAt = instance.EndedAt;
@@ -1181,15 +1219,63 @@ internal sealed class ScriptRunnerPage : UserControl
                 .Append(instance.ErrorMessage);
         }
 
-        _selectedRunInstanceDetailsLabel.Text = details.ToString();
-        _selectedRunInstanceDetailsLabel.ForeColor = state switch
+        view.DetailsLabel.Text = details.ToString();
+        view.DetailsLabel.ForeColor = state switch
         {
-            ScriptRunState.Running or ScriptRunState.Starting => Color.FromArgb(92, 71, 165),
+            ScriptRunState.Running or
+            ScriptRunState.Starting or
+            ScriptRunState.Stopping => Color.FromArgb(92, 71, 165),
             ScriptRunState.Succeeded => Color.FromArgb(23, 112, 41),
             ScriptRunState.Failed or ScriptRunState.StartFailed => Color.FromArgb(180, 45, 30),
             ScriptRunState.Stopped => Color.FromArgb(120, 88, 30),
             _ => Color.FromArgb(82, 91, 104)
         };
+        view.StopButton.Enabled = instance.CanStop;
+        view.StopButton.Text = state == ScriptRunState.Stopping
+            ? "正在终止"
+            : "终止";
+    }
+
+    private void StopRunInstance(ScriptRunInstance instance)
+    {
+        if (!instance.CanStop)
+        {
+            return;
+        }
+
+        if (!_scriptProcessRunner.TryStop(instance.Id, out var errorMessage))
+        {
+            MessageBox.Show(
+                this,
+                errorMessage,
+                "无法终止脚本",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            RefreshRunInstanceUi();
+            return;
+        }
+
+        SetScriptConfigurationStatus(
+            $"正在终止脚本“{instance.ScriptSnapshot.Name}”及其子进程。",
+            isError: false);
+        RefreshRunInstanceUi();
+    }
+
+    private bool TryGetSelectedRunInstanceView(
+        out ScriptRunInstance instance,
+        out RunInstanceTabView view)
+    {
+        instance = null!;
+        view = null!;
+        if (_runInstancesTabControl.SelectedTab?.Tag is not ScriptRunInstance selected ||
+            !_runInstanceTabViews.TryGetValue(selected.Id, out var selectedView))
+        {
+            return false;
+        }
+
+        instance = selected;
+        view = selectedView;
+        return true;
     }
 
     private void OnRunInstanceStateChanged(object? sender, EventArgs eventArgs)
@@ -1220,7 +1306,7 @@ internal sealed class ScriptRunnerPage : UserControl
 
     private void RefreshRunInstanceUi()
     {
-        RefreshRunInstancesList();
+        RefreshRunInstanceTabs();
         RefreshSelectedRunInstanceOutput(force: false);
     }
 
@@ -1274,10 +1360,12 @@ internal sealed class ScriptRunnerPage : UserControl
         var stateText = ScriptRunInstance.GetStateDisplayName(instance.State);
         var processText = instance.State switch
         {
-            ScriptRunState.Running when instance.ProcessId.HasValue =>
-                $"PID {instance.ProcessId.Value}",
-            ScriptRunState.Succeeded or ScriptRunState.Failed when instance.ExitCode.HasValue =>
-                $"退出码 {instance.ExitCode.Value}",
+            ScriptRunState.Running or ScriptRunState.Stopping
+                when instance.ProcessId.HasValue => $"PID {instance.ProcessId.Value}",
+            ScriptRunState.Succeeded or
+            ScriptRunState.Failed or
+            ScriptRunState.Stopped
+                when instance.ExitCode.HasValue => $"退出码 {instance.ExitCode.Value}",
             ScriptRunState.StartFailed when !string.IsNullOrWhiteSpace(instance.ErrorMessage) =>
                 instance.ErrorMessage,
             _ => string.Empty
@@ -1288,6 +1376,11 @@ internal sealed class ScriptRunnerPage : UserControl
 
         return $"{instance.StartedAt:HH:mm:ss}  {instance.ScriptSnapshot.Name}  {stateDetail}  [{instance.WorkingDirectory}]";
     }
+
+    private static string FormatRunInstanceTab(ScriptRunInstance instance) =>
+        $"{instance.ScriptSnapshot.Name} · " +
+        $"{ScriptRunInstance.GetStateDisplayName(instance.State)} · " +
+        $"{instance.StartedAt:HH:mm:ss}";
 
     private static string FormatDuration(TimeSpan duration)
     {
@@ -1424,6 +1517,12 @@ internal sealed class ScriptRunnerPage : UserControl
             CornerRadius = 18,
             Padding = padding
         };
+
+    private sealed record RunInstanceTabView(
+        TabPage TabPage,
+        Label DetailsLabel,
+        Button StopButton,
+        RichTextBox OutputTextBox);
 
     private static void SyncScrollExtent(Panel scrollPanel, Control content)
     {

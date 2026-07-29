@@ -115,6 +115,52 @@ internal sealed class ScriptProcessRunner : IDisposable
         return instance;
     }
 
+    public bool TryStop(Guid instanceId, out string errorMessage)
+    {
+        ActiveProcess? activeProcess;
+        lock (_syncRoot)
+        {
+            if (_disposed)
+            {
+                errorMessage = "脚本运行器已关闭。";
+                return false;
+            }
+
+            if (!_activeProcesses.TryGetValue(instanceId, out activeProcess))
+            {
+                errorMessage = "该运行实例已经结束，无法再次终止。";
+                return false;
+            }
+
+            if (!activeProcess.Instance.CanStop)
+            {
+                errorMessage = "该运行实例当前不能终止。";
+                return false;
+            }
+
+            try
+            {
+                if (activeProcess.Process.HasExited)
+                {
+                    errorMessage = "该运行实例已经结束，无法再次终止。";
+                    return false;
+                }
+
+                activeProcess.Process.Kill(entireProcessTree: true);
+                activeProcess.StopRequested = true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"终止脚本进程失败：{ex.Message}";
+                return false;
+            }
+        }
+
+        activeProcess.Instance.MarkStopping();
+        errorMessage = string.Empty;
+        return true;
+    }
+
     public void Dispose()
     {
         List<ActiveProcess> activeProcesses;
@@ -198,7 +244,14 @@ internal sealed class ScriptProcessRunner : IDisposable
         try
         {
             process.WaitForExit();
-            activeProcess.Instance.MarkExited(process.ExitCode);
+            if (activeProcess.StopRequested)
+            {
+                activeProcess.Instance.MarkStopped(process.ExitCode);
+            }
+            else
+            {
+                activeProcess.Instance.MarkExited(process.ExitCode);
+            }
         }
         catch (Exception ex)
         {
@@ -260,7 +313,14 @@ internal sealed class ScriptProcessRunner : IDisposable
         }
     }
 
-    private sealed record ActiveProcess(
-        ScriptRunInstance Instance,
-        Process Process);
+    private sealed class ActiveProcess(
+        ScriptRunInstance instance,
+        Process process)
+    {
+        public ScriptRunInstance Instance { get; } = instance;
+
+        public Process Process { get; } = process;
+
+        public bool StopRequested { get; set; }
+    }
 }
