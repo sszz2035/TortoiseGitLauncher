@@ -117,6 +117,34 @@ internal sealed partial class MainForm : Form
         }
     }
 
+    protected override void OnFormClosing(FormClosingEventArgs eventArgs)
+    {
+        var runningCount = _scriptRunnerPage.RunningInstanceCount;
+        if (eventArgs.CloseReason == CloseReason.UserClosing &&
+            runningCount > 0)
+        {
+            var result = MessageBox.Show(
+                this,
+                $"仍有 {runningCount} 个脚本实例正在运行。" +
+                $"{Environment.NewLine}{Environment.NewLine}" +
+                "确认退出后，这些实例及其子进程将被终止。",
+                "确认退出",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (result != DialogResult.Yes)
+            {
+                eventArgs.Cancel = true;
+                return;
+            }
+
+            _scriptRunnerPage.StopAllRunningInstances();
+        }
+
+        base.OnFormClosing(eventArgs);
+    }
+
     private Control CreateSidebar()
     {
         var sidebarCard = new CardPanel

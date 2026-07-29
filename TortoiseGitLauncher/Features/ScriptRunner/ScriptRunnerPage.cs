@@ -26,6 +26,7 @@ internal sealed class ScriptRunnerPage : UserControl
     private readonly ScriptProcessRunner _scriptProcessRunner = new();
     private readonly List<ScriptRunInstance> _runInstances = [];
     private Label _runInstancesSummaryLabel = null!;
+    private Button _clearCompletedRunInstancesButton = null!;
     private TabControl _runInstancesTabControl = null!;
     private readonly Dictionary<Guid, RunInstanceTabView> _runInstanceTabViews = [];
     private readonly System.Windows.Forms.Timer _runUiRefreshTimer = new()
@@ -82,6 +83,14 @@ internal sealed class ScriptRunnerPage : UserControl
         }
     }
 
+    public int RunningInstanceCount =>
+        _runInstances.Count(instance => instance.IsRunning);
+
+    public void StopAllRunningInstances()
+    {
+        _scriptProcessRunner.StopAll();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -91,6 +100,14 @@ internal sealed class ScriptRunnerPage : UserControl
                 instance.StateChanged -= OnRunInstanceStateChanged;
             }
 
+            foreach (var view in _runInstanceTabViews.Values)
+            {
+                DisposeRunInstanceButtonImages(view);
+            }
+
+            _clearCompletedRunInstancesButton.Image?.Dispose();
+            _clearCompletedRunInstancesButton.Image = null;
+            _runInstanceTabViews.Clear();
             _runUiRefreshTimer.Stop();
             _runUiRefreshTimer.Dispose();
             _scriptProcessRunner.Dispose();
@@ -908,14 +925,36 @@ internal sealed class ScriptRunnerPage : UserControl
             UiIconKind.RepoStatus,
             Color.FromArgb(168, 85, 247)), 0, 0);
 
+        var instancesToolbar = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        instancesToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        instancesToolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
         _runInstancesSummaryLabel = new Label
         {
             Text = "暂无运行实例",
             AutoSize = true,
             ForeColor = Color.FromArgb(82, 91, 104),
-            Margin = new Padding(0, 0, 0, 8)
+            Margin = new Padding(0, 7, 12, 0)
         };
-        layout.Controls.Add(_runInstancesSummaryLabel, 0, 1);
+        instancesToolbar.Controls.Add(_runInstancesSummaryLabel, 0, 0);
+
+        _clearCompletedRunInstancesButton = CreateRunInstanceCommandButton(
+            "清除已结束",
+            UiIconKind.Cleanup,
+            Color.FromArgb(88, 96, 108));
+        _clearCompletedRunInstancesButton.Click += (_, _) =>
+            ClearCompletedRunInstances();
+        instancesToolbar.Controls.Add(_clearCompletedRunInstancesButton, 1, 0);
+        layout.Controls.Add(instancesToolbar, 0, 1);
 
         _runInstancesTabControl = new TabControl
         {
@@ -974,6 +1013,8 @@ internal sealed class ScriptRunnerPage : UserControl
         _runInstancesSummaryLabel.Text = _runInstances.Count == 0
             ? "暂无运行实例"
             : $"共 {_runInstances.Count} 个实例，{runningCount} 个运行中";
+        _clearCompletedRunInstancesButton.Enabled =
+            _runInstances.Any(instance => !instance.IsRunning);
 
         var targetId = selectedInstanceId ?? previousId;
         if (targetId.HasValue &&
@@ -1013,12 +1054,13 @@ internal sealed class ScriptRunnerPage : UserControl
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1,
             BackColor = Color.Transparent,
             Margin = new Padding(0, 0, 0, 8)
         };
         detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         var detailsLabel = new Label
@@ -1057,6 +1099,15 @@ internal sealed class ScriptRunnerPage : UserControl
         stopButton.FlatAppearance.BorderColor = Color.FromArgb(239, 190, 190);
         stopButton.Click += (_, _) => StopRunInstance(instance);
         detailsLayout.Controls.Add(stopButton, 1, 0);
+
+        var removeButton = CreateRunInstanceCommandButton(
+            "移除",
+            UiIconKind.Resolve,
+            Color.FromArgb(82, 91, 104));
+        removeButton.Width = 92;
+        removeButton.Margin = new Padding(8, 0, 0, 0);
+        removeButton.Click += (_, _) => RemoveRunInstance(instance);
+        detailsLayout.Controls.Add(removeButton, 2, 0);
         pageLayout.Controls.Add(detailsLayout, 0, 0);
 
         var outputTextBox = new RichTextBox
@@ -1079,6 +1130,7 @@ internal sealed class ScriptRunnerPage : UserControl
             tabPage,
             detailsLabel,
             stopButton,
+            removeButton,
             outputTextBox);
     }
 
@@ -1092,6 +1144,7 @@ internal sealed class ScriptRunnerPage : UserControl
         view.StopButton.Text = instance.State == ScriptRunState.Stopping
             ? "正在终止"
             : "终止";
+        view.RemoveButton.Enabled = !instance.IsRunning;
     }
 
     private void RefreshSelectedRunInstanceOutput(bool force)
@@ -1234,6 +1287,7 @@ internal sealed class ScriptRunnerPage : UserControl
         view.StopButton.Text = state == ScriptRunState.Stopping
             ? "正在终止"
             : "终止";
+        view.RemoveButton.Enabled = !instance.IsRunning;
     }
 
     private void StopRunInstance(ScriptRunInstance instance)
@@ -1259,6 +1313,65 @@ internal sealed class ScriptRunnerPage : UserControl
             $"正在终止脚本“{instance.ScriptSnapshot.Name}”及其子进程。",
             isError: false);
         RefreshRunInstanceUi();
+    }
+
+    private void RemoveRunInstance(ScriptRunInstance instance)
+    {
+        if (instance.IsRunning)
+        {
+            return;
+        }
+
+        RemoveRunInstanceCore(instance);
+        ResetRenderedOutputState();
+        RefreshRunInstanceUi();
+        SetScriptConfigurationStatus(
+            $"已移除运行实例“{instance.ScriptSnapshot.Name}”。",
+            isError: false);
+    }
+
+    private void ClearCompletedRunInstances()
+    {
+        var completedInstances = _runInstances
+            .Where(instance => !instance.IsRunning)
+            .ToArray();
+        if (completedInstances.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var instance in completedInstances)
+        {
+            RemoveRunInstanceCore(instance);
+        }
+
+        ResetRenderedOutputState();
+        RefreshRunInstanceUi();
+        SetScriptConfigurationStatus(
+            $"已清除 {completedInstances.Length} 个已结束运行实例。",
+            isError: false);
+    }
+
+    private void RemoveRunInstanceCore(ScriptRunInstance instance)
+    {
+        instance.StateChanged -= OnRunInstanceStateChanged;
+        _runInstances.Remove(instance);
+        if (!_runInstanceTabViews.Remove(instance.Id, out var view))
+        {
+            return;
+        }
+
+        _runInstancesTabControl.TabPages.Remove(view.TabPage);
+        DisposeRunInstanceButtonImages(view);
+        view.TabPage.Dispose();
+    }
+
+    private static void DisposeRunInstanceButtonImages(RunInstanceTabView view)
+    {
+        view.StopButton.Image?.Dispose();
+        view.StopButton.Image = null;
+        view.RemoveButton.Image?.Dispose();
+        view.RemoveButton.Image = null;
     }
 
     private bool TryGetSelectedRunInstanceView(
@@ -1479,6 +1592,35 @@ internal sealed class ScriptRunnerPage : UserControl
         return titleRow;
     }
 
+    private static Button CreateRunInstanceCommandButton(
+        string text,
+        UiIconKind iconKind,
+        Color iconColor)
+    {
+        var button = new Button
+        {
+            Text = text,
+            Width = 126,
+            Height = 32,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.White,
+            ForeColor = Color.FromArgb(64, 72, 84),
+            Font = new Font(
+                "Microsoft YaHei UI",
+                9F,
+                FontStyle.Regular,
+                GraphicsUnit.Point),
+            Image = IconFactory.Create(iconKind, iconColor, 15),
+            TextImageRelation = TextImageRelation.ImageBeforeText,
+            ImageAlign = ContentAlignment.MiddleLeft,
+            TextAlign = ContentAlignment.MiddleCenter,
+            UseCompatibleTextRendering = true,
+            Margin = new Padding(0)
+        };
+        button.FlatAppearance.BorderColor = Color.FromArgb(214, 223, 236);
+        return button;
+    }
+
     private static Button CreateActionButton(
         string text,
         UiIconKind iconKind,
@@ -1522,6 +1664,7 @@ internal sealed class ScriptRunnerPage : UserControl
         TabPage TabPage,
         Label DetailsLabel,
         Button StopButton,
+        Button RemoveButton,
         RichTextBox OutputTextBox);
 
     private static void SyncScrollExtent(Panel scrollPanel, Control content)

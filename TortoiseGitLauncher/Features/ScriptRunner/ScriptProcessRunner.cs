@@ -161,6 +161,25 @@ internal sealed class ScriptProcessRunner : IDisposable
         return true;
     }
 
+    public void StopAll()
+    {
+        Guid[] instanceIds;
+        lock (_syncRoot)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            instanceIds = _activeProcesses.Keys.ToArray();
+        }
+
+        foreach (var instanceId in instanceIds)
+        {
+            TryStop(instanceId, out _);
+        }
+    }
+
     public void Dispose()
     {
         List<ActiveProcess> activeProcesses;
