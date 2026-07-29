@@ -39,7 +39,7 @@ TortoiseGitLauncher/
 | 模块 | 职责 |
 | --- | --- |
 | `Program.cs` | 进程入口、WinForms 初始化、顶层异常记录 |
-| `Features/ScriptRunner` | 脚本执行页面及后续配置、持久化和进程生命周期 |
+| `Features/ScriptRunner` | 脚本执行页面、目录与脚本配置、持久化、运行实例和进程生命周期 |
 | `UI/MainForm.cs` | 应用外壳、导航和页面装配 |
 | `UI/MainForm.RepositoryManagement.cs` | 仓库管理页及 TortoiseGit 命令交互 |
 | `UI/RepositoryListManagerForm.cs` | 仓库列表编辑对话框 |
@@ -48,30 +48,18 @@ TortoiseGitLauncher/
 | `Models` | 仓库与命令定义 |
 | `Services` | 仓库历史、Git 路径和 TortoiseGit 定位 |
 
-## 脚本执行功能建议落点
+## 脚本执行功能实际边界
 
-脚本执行属于包含 UI、持久化和进程生命周期的独立功能，建议按功能纵向组织：
+脚本执行按功能纵向组织在 `Features/ScriptRunner/`：
 
-```text
-TortoiseGitLauncher/
-  Features/
-    ScriptRunner/
-      ScriptRunnerPage.cs
-      ScriptConfigurationForm.cs
-      ScriptConfiguration.cs
-      ScriptRunnerSettings.cs
-      ScriptRunnerStore.cs
-      ScriptProcessRunner.cs
-      ScriptRunInstance.cs
-```
-
-文件名可以随实现细化，但必须保持以下边界：
-
-- `ScriptRunnerPage` 只负责页面状态和用户交互。
-- `ScriptRunnerStore` 只负责 JSON 读取、兼容和保存。
-- `ScriptProcessRunner` 负责启动、输出重定向、停止进程树和退出状态。
-- `ScriptRunInstance` 保存单次运行状态，不与持久化脚本配置混用。
-- 主窗体只负责创建页面和切换导航，不接管脚本运行细节。
+- `ScriptRunnerPage`：页面状态、目录与脚本入口、实例标签页和用户操作。
+- `ExecutionDirectoryManagerForm`：最近执行目录的重命名、排序和删除。
+- `ScriptConfigurationForm`、`ScriptConfigurationManagerForm`：脚本配置创建、编辑、排序和删除。
+- `ScriptRunnerSettings`、`ScriptRunnerStore`：版本化配置模型、兼容读取和安全保存。
+- `ScriptRunnerPathHelper`：脚本与执行目录的路径规范化和类型识别。
+- `ScriptProcessRunner`：脚本启动、输出重定向、并发进程跟踪和进程树终止。
+- `ScriptRunInstance`：单次运行的配置快照、线程安全状态和 10,000 行输出缓冲。
+- `MainForm`：只负责页面装配、导航切换和关闭应用时的运行实例确认。
 
 ## 拆分原则
 
