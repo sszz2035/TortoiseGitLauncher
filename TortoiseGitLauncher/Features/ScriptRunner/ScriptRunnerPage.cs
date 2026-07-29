@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
 
 namespace TortoiseGitLauncher;
@@ -26,6 +27,16 @@ internal sealed class ScriptRunnerPage : UserControl
     private readonly List<ScriptRunInstance> _runInstances = [];
     private Label _runInstancesSummaryLabel = null!;
     private ListBox _runInstancesListBox = null!;
+    private Label _selectedRunInstanceDetailsLabel = null!;
+    private RichTextBox _runOutputTextBox = null!;
+    private readonly System.Windows.Forms.Timer _runUiRefreshTimer = new()
+    {
+        Interval = 250
+    };
+    private Guid? _renderedOutputInstanceId;
+    private long _renderedOutputVersion = -1;
+    private long _renderedOutputFirstSequence;
+    private long _renderedOutputLastSequence;
 
     public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath)
     {
@@ -62,6 +73,9 @@ internal sealed class ScriptRunnerPage : UserControl
         scrollPanel.Controls.Add(contentLayout);
         Controls.Add(scrollPanel);
 
+        _runUiRefreshTimer.Tick += (_, _) => RefreshSelectedRunInstanceOutput(force: false);
+        _runUiRefreshTimer.Start();
+
         InitializeDirectorySelection(initialRepositoryRootPath, persistSelection: loadWarning is null);
         if (!string.IsNullOrWhiteSpace(loadWarning))
         {
@@ -78,6 +92,8 @@ internal sealed class ScriptRunnerPage : UserControl
                 instance.StateChanged -= OnRunInstanceStateChanged;
             }
 
+            _runUiRefreshTimer.Stop();
+            _runUiRefreshTimer.Dispose();
             _scriptProcessRunner.Dispose();
             _scriptButtonToolTip.Dispose();
         }
@@ -889,7 +905,7 @@ internal sealed class ScriptRunnerPage : UserControl
             BackColor = Color.Transparent
         };
         layout.Controls.Add(CreateSectionTitle(
-            "运行实例",
+            "运行实例与输出",
             UiIconKind.RepoStatus,
             Color.FromArgb(168, 85, 247)), 0, 0);
 
@@ -902,16 +918,27 @@ internal sealed class ScriptRunnerPage : UserControl
         };
         layout.Controls.Add(_runInstancesSummaryLabel, 0, 1);
 
-        _runInstancesListBox = new ListBox
+        var contentLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 190,
+            Height = 330,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0)
+        };
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38F));
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62F));
+
+        _runInstancesListBox = new ListBox
+        {
+            Dock = DockStyle.Fill,
             IntegralHeight = false,
             HorizontalScrollbar = true,
             FormattingEnabled = true,
             BackColor = Color.FromArgb(248, 250, 253),
             BorderStyle = BorderStyle.FixedSingle,
-            Margin = new Padding(0)
+            Margin = new Padding(0, 0, 12, 0)
         };
         _runInstancesListBox.Format += (_, eventArgs) =>
         {
@@ -920,10 +947,51 @@ internal sealed class ScriptRunnerPage : UserControl
                 eventArgs.Value = FormatRunInstance(instance);
             }
         };
-        layout.Controls.Add(_runInstancesListBox, 0, 2);
+        _runInstancesListBox.SelectedIndexChanged += (_, _) =>
+            RefreshSelectedRunInstanceOutput(force: true);
+        contentLayout.Controls.Add(_runInstancesListBox, 0, 0);
+
+        var outputLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            BackColor = Color.Transparent,
+            Margin = new Padding(12, 0, 0, 0)
+        };
+        outputLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        outputLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _selectedRunInstanceDetailsLabel = new Label
+        {
+            Text = "未选择运行实例",
+            AutoSize = true,
+            MaximumSize = new Size(680, 0),
+            ForeColor = Color.FromArgb(82, 91, 104),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        outputLayout.Controls.Add(_selectedRunInstanceDetailsLabel, 0, 0);
+
+        _runOutputTextBox = new RichTextBox
+        {
+            Dock = DockStyle.Fill,
+            ReadOnly = true,
+            WordWrap = false,
+            DetectUrls = false,
+            ScrollBars = RichTextBoxScrollBars.Both,
+            BackColor = Color.White,
+            ForeColor = Color.FromArgb(35, 42, 52),
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Consolas", 9.5F, FontStyle.Regular, GraphicsUnit.Point),
+            Margin = new Padding(0)
+        };
+        outputLayout.Controls.Add(_runOutputTextBox, 0, 1);
+        contentLayout.Controls.Add(outputLayout, 1, 0);
+        layout.Controls.Add(contentLayout, 0, 2);
 
         card.Controls.Add(layout);
         RefreshRunInstancesList();
+        RefreshSelectedRunInstanceOutput(force: true);
         return card;
     }
 
@@ -958,6 +1026,7 @@ internal sealed class ScriptRunnerPage : UserControl
             ? "暂无运行实例"
             : $"共 {_runInstances.Count} 个实例，{runningCount} 个运行中";
 
+        var restoredSelection = false;
         if (selectedId.HasValue)
         {
             for (var index = 0; index < _runInstancesListBox.Items.Count; index++)
@@ -966,14 +1035,161 @@ internal sealed class ScriptRunnerPage : UserControl
                     instance.Id == selectedId.Value)
                 {
                     _runInstancesListBox.SelectedIndex = index;
+                    restoredSelection = true;
                     break;
                 }
             }
         }
-        else if (_runInstancesListBox.Items.Count > 0)
+
+        if (!restoredSelection && _runInstancesListBox.Items.Count > 0)
         {
             _runInstancesListBox.SelectedIndex = 0;
         }
+    }
+
+    private void RefreshSelectedRunInstanceOutput(bool force)
+    {
+        if (IsDisposed || Disposing ||
+            _selectedRunInstanceDetailsLabel is null || _runOutputTextBox is null)
+        {
+            return;
+        }
+
+        if (_runInstancesListBox.SelectedItem is not ScriptRunInstance instance)
+        {
+            _selectedRunInstanceDetailsLabel.Text = "未选择运行实例";
+            _selectedRunInstanceDetailsLabel.ForeColor = Color.FromArgb(82, 91, 104);
+            if (_runOutputTextBox.TextLength > 0)
+            {
+                _runOutputTextBox.Clear();
+            }
+
+            ResetRenderedOutputState();
+            return;
+        }
+
+        UpdateSelectedRunInstanceDetails(instance);
+        var outputVersion = instance.OutputVersion;
+        if (!force &&
+            _renderedOutputInstanceId == instance.Id &&
+            _renderedOutputVersion == outputVersion)
+        {
+            return;
+        }
+
+        var snapshot = instance.GetOutputSnapshot();
+        var lines = snapshot.Lines;
+        var firstSequence = lines.Count > 0 ? lines[0].Sequence : 0;
+        var selectedInstanceChanged = _renderedOutputInstanceId != instance.Id;
+        var bufferWasTrimmed =
+            _renderedOutputFirstSequence > 0 &&
+            firstSequence > _renderedOutputFirstSequence;
+        var rebuildOutput = force || selectedInstanceChanged || bufferWasTrimmed;
+
+        var shouldScrollToEnd = force ||
+                                _runOutputTextBox.TextLength == 0 ||
+                                _runOutputTextBox.SelectionStart >=
+                                Math.Max(0, _runOutputTextBox.TextLength - 1);
+        var previousSelectionStart = _runOutputTextBox.SelectionStart;
+        var previousSelectionLength = _runOutputTextBox.SelectionLength;
+
+        if (lines.Count == 0)
+        {
+            if (rebuildOutput || _runOutputTextBox.TextLength > 0)
+            {
+                _runOutputTextBox.Clear();
+            }
+
+            _renderedOutputFirstSequence = 0;
+            _renderedOutputLastSequence = 0;
+        }
+        else if (rebuildOutput)
+        {
+            _runOutputTextBox.Text = BuildOutputText(snapshot);
+            _renderedOutputFirstSequence = firstSequence;
+            _renderedOutputLastSequence = lines[^1].Sequence;
+        }
+        else
+        {
+            var appendedLines = lines
+                .Where(line => line.Sequence > _renderedOutputLastSequence)
+                .ToArray();
+            if (appendedLines.Length > 0)
+            {
+                _runOutputTextBox.AppendText(BuildOutputText(appendedLines));
+                _renderedOutputLastSequence = appendedLines[^1].Sequence;
+            }
+
+            if (_renderedOutputFirstSequence == 0)
+            {
+                _renderedOutputFirstSequence = firstSequence;
+            }
+        }
+
+        _renderedOutputInstanceId = instance.Id;
+        _renderedOutputVersion = snapshot.Version;
+        if (shouldScrollToEnd)
+        {
+            _runOutputTextBox.SelectionStart = _runOutputTextBox.TextLength;
+            _runOutputTextBox.SelectionLength = 0;
+            _runOutputTextBox.ScrollToCaret();
+        }
+        else
+        {
+            _runOutputTextBox.SelectionStart = Math.Min(
+                previousSelectionStart,
+                _runOutputTextBox.TextLength);
+            _runOutputTextBox.SelectionLength = Math.Min(
+                previousSelectionLength,
+                _runOutputTextBox.TextLength - _runOutputTextBox.SelectionStart);
+        }
+    }
+
+    private void UpdateSelectedRunInstanceDetails(ScriptRunInstance instance)
+    {
+        var state = instance.State;
+        var endedAt = instance.EndedAt;
+        var elapsed = (endedAt ?? DateTimeOffset.Now) - instance.StartedAt;
+        var endText = endedAt.HasValue
+            ? endedAt.Value.ToString("yyyy-MM-dd HH:mm:ss")
+            : "运行中";
+        var exitCodeText = instance.ExitCode.HasValue
+            ? instance.ExitCode.Value.ToString()
+            : "--";
+
+        var details = new StringBuilder()
+            .Append(instance.ScriptSnapshot.Name)
+            .Append("    状态：")
+            .Append(ScriptRunInstance.GetStateDisplayName(state))
+            .Append("    开始：")
+            .Append(instance.StartedAt.ToString("yyyy-MM-dd HH:mm:ss"))
+            .Append("    结束：")
+            .Append(endText)
+            .Append("    用时：")
+            .Append(FormatDuration(elapsed))
+            .Append("    退出码：")
+            .Append(exitCodeText)
+            .AppendLine()
+            .Append("执行目录：")
+            .Append(instance.WorkingDirectory);
+
+        if (!string.IsNullOrWhiteSpace(instance.ErrorMessage))
+        {
+            details
+                .AppendLine()
+                .Append("错误：")
+                .Append(instance.ErrorMessage);
+        }
+
+        _selectedRunInstanceDetailsLabel.Text = details.ToString();
+        _selectedRunInstanceDetailsLabel.ForeColor = state switch
+        {
+            ScriptRunState.Running or ScriptRunState.Starting => Color.FromArgb(92, 71, 165),
+            ScriptRunState.Succeeded => Color.FromArgb(23, 112, 41),
+            ScriptRunState.Failed or ScriptRunState.StartFailed => Color.FromArgb(180, 45, 30),
+            ScriptRunState.Stopped => Color.FromArgb(120, 88, 30),
+            _ => Color.FromArgb(82, 91, 104)
+        };
     }
 
     private void OnRunInstanceStateChanged(object? sender, EventArgs eventArgs)
@@ -987,7 +1203,7 @@ internal sealed class ScriptRunnerPage : UserControl
         {
             try
             {
-                BeginInvoke((Action)RefreshRunInstancesList);
+                BeginInvoke((Action)RefreshRunInstanceUi);
             }
             catch (ObjectDisposedException)
             {
@@ -999,7 +1215,58 @@ internal sealed class ScriptRunnerPage : UserControl
             return;
         }
 
+        RefreshRunInstanceUi();
+    }
+
+    private void RefreshRunInstanceUi()
+    {
         RefreshRunInstancesList();
+        RefreshSelectedRunInstanceOutput(force: false);
+    }
+
+    private void ResetRenderedOutputState()
+    {
+        _renderedOutputInstanceId = null;
+        _renderedOutputVersion = -1;
+        _renderedOutputFirstSequence = 0;
+        _renderedOutputLastSequence = 0;
+    }
+
+    private static string BuildOutputText(ScriptOutputSnapshot snapshot)
+    {
+        var builder = new StringBuilder();
+        if (snapshot.DroppedLineCount > 0)
+        {
+            builder
+                .Append("[已省略较早的 ")
+                .Append(snapshot.DroppedLineCount)
+                .AppendLine(" 行输出]");
+        }
+
+        AppendOutputLines(builder, snapshot.Lines);
+        return builder.ToString();
+    }
+
+    private static string BuildOutputText(IEnumerable<ScriptOutputLine> lines)
+    {
+        var builder = new StringBuilder();
+        AppendOutputLines(builder, lines);
+        return builder.ToString();
+    }
+
+    private static void AppendOutputLines(
+        StringBuilder builder,
+        IEnumerable<ScriptOutputLine> lines)
+    {
+        foreach (var line in lines)
+        {
+            if (line.Stream == ScriptOutputStream.StandardError)
+            {
+                builder.Append("[stderr] ");
+            }
+
+            builder.AppendLine(line.Text);
+        }
     }
 
     private static string FormatRunInstance(ScriptRunInstance instance)
@@ -1020,6 +1287,16 @@ internal sealed class ScriptRunnerPage : UserControl
             : $"{stateText}，{processText}";
 
         return $"{instance.StartedAt:HH:mm:ss}  {instance.ScriptSnapshot.Name}  {stateDetail}  [{instance.WorkingDirectory}]";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration < TimeSpan.Zero)
+        {
+            duration = TimeSpan.Zero;
+        }
+
+        return $"{(int)duration.TotalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}";
     }
 
     private static Control CreateHeaderCard()
