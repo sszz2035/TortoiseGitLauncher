@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Text;
 using System.Windows.Forms;
@@ -131,10 +132,21 @@ internal sealed class ScriptRunnerPage : UserControl
             RowCount = 4,
             BackColor = Color.Transparent
         };
+        var openDirectoryButton = CreateActionButton(
+            "打开根目录",
+            UiIconKind.RepoFolder,
+            Color.FromArgb(59, 130, 246),
+            Color.FromArgb(243, 247, 255));
+        openDirectoryButton.AutoSize = false;
+        openDirectoryButton.Size = new Size(128, 34);
+        openDirectoryButton.Padding = new Padding(9, 4, 9, 4);
+        openDirectoryButton.Margin = new Padding(14, 0, 0, 0);
+        openDirectoryButton.Click += (_, _) => OpenExecutionDirectoryInExplorer();
         layout.Controls.Add(CreateSectionTitle(
             "执行目录",
             UiIconKind.RepoFolder,
-            Color.FromArgb(59, 130, 246)), 0, 0);
+            Color.FromArgb(59, 130, 246),
+            openDirectoryButton), 0, 0);
 
         var selectionRow = new TableLayoutPanel
         {
@@ -878,6 +890,54 @@ internal sealed class ScriptRunnerPage : UserControl
         return false;
     }
 
+    private void OpenExecutionDirectoryInExplorer()
+    {
+        if (_selectedDirectory is null)
+        {
+            SetDirectoryStatus("当前未选择有效的执行目录。", isError: true);
+            MessageBox.Show(
+                "当前未选择有效的执行目录，请先从下拉框选择，或点“选择执行目录”。",
+                "无法打开",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        var directoryPath = _selectedDirectory.DirectoryPath;
+        if (!Directory.Exists(directoryPath))
+        {
+            SetDirectoryStatus("当前执行目录不存在或暂时不可访问。", isError: true);
+            MessageBox.Show(
+                "当前选中的执行目录不存在或暂时不可访问，请先检查路径，或在“管理目录列表”里删除该项。",
+                "路径不可用",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            UseShellExecute = true
+        };
+        startInfo.ArgumentList.Add(directoryPath);
+
+        try
+        {
+            Process.Start(startInfo);
+            SetDirectoryStatus($"已在文件资源管理器中打开执行目录: {directoryPath}", isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetDirectoryStatus($"打开执行目录失败: {ex.Message}", isError: true);
+            MessageBox.Show(
+                $"无法在文件资源管理器中打开执行目录。\r\n\r\n{ex.Message}",
+                "打开失败",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
     private void SetDirectoryStatus(string message, bool isError)
     {
         _directoryStatusLabel.Text = message;
@@ -1562,18 +1622,28 @@ internal sealed class ScriptRunnerPage : UserControl
     private static Control CreateSectionTitle(
         string title,
         UiIconKind iconKind,
-        Color accentColor)
+        Color accentColor,
+        Control? actionControl = null)
     {
         var titleRow = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 2,
+            ColumnCount = actionControl is null ? 2 : 4,
             Margin = new Padding(0, 0, 0, 12),
             BackColor = Color.Transparent
         };
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        if (actionControl is null)
+        {
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        }
+        else
+        {
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        }
         titleRow.Controls.Add(new PictureBox
         {
             Size = new Size(18, 18),
@@ -1589,6 +1659,11 @@ internal sealed class ScriptRunnerPage : UserControl
             Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold, GraphicsUnit.Point),
             Margin = new Padding(8, 0, 0, 0)
         }, 1, 0);
+        if (actionControl is not null)
+        {
+            titleRow.Controls.Add(actionControl, 2, 0);
+        }
+
         return titleRow;
     }
 
