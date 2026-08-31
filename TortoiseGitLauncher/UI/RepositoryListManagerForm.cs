@@ -15,6 +15,7 @@ internal sealed class RepositoryListManagerForm : Form
     private readonly Label _summaryLabel;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
+    private Point _dragStartPoint;
 
     public string? SelectedRepoRootPath { get; private set; }
 
@@ -81,10 +82,29 @@ internal sealed class RepositoryListManagerForm : Form
             IntegralHeight = false,
             HorizontalScrollbar = true,
             SelectionMode = SelectionMode.MultiExtended,
+            AllowDrop = true,
             Margin = new Padding(0, 0, 0, 10)
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
-        _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
+        _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseMove += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Left ||
+                (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
+                 Math.Abs(eventArgs.Y - _dragStartPoint.Y) < SystemInformation.DragSize.Height / 2))
+            {
+                return;
+            }
+
+            var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
+            if (dragIndex >= 0)
+            {
+                BeginDrag(_entriesListBox.Items[dragIndex]);
+            }
+        };
+        _entriesListBox.DragEnter += (_, eventArgs) => eventArgs.Effect = eventArgs.Data?.GetDataPresent(typeof(RepositoryDragPayload)) == true ? DragDropEffects.Move : DragDropEffects.None;
+        _entriesListBox.DragOver += (_, eventArgs) => eventArgs.Effect = eventArgs.Data?.GetDataPresent(typeof(RepositoryDragPayload)) == true ? DragDropEffects.Move : DragDropEffects.None;
+        _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
         _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
 
@@ -143,7 +163,7 @@ internal sealed class RepositoryListManagerForm : Form
         rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
         _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_pathTextBox, 0, 7);
-        rightPanel.Controls.Add(new Label { Text = "组标题不可作为当前仓库选择；双击组标题或使用按钮可展开/收起。", AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90), MaximumSize = new Size(450, 0) }, 0, 8);
+        rightPanel.Controls.Add(new Label { Text = "组标题不可作为当前仓库选择；双击组标题可展开/收起。拖拽仓库到组或其他仓库可调整归属。", AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90), MaximumSize = new Size(450, 0) }, 0, 8);
         contentLayout.Controls.Add(rightPanel, 1, 0);
         rootLayout.Controls.Add(contentLayout, 0, 1);
 
@@ -208,6 +228,93 @@ internal sealed class RepositoryListManagerForm : Form
         UpdateEditorFromSelection();
     }
 
+    private void BeginDrag(object? item)
+    {
+        if (item is not RepositoryManagerRow row)
+        {
+            return;
+        }
+
+        if (!_entriesListBox.SelectedItems.Contains(row))
+        {
+            _entriesListBox.ClearSelected();
+            var index = _entriesListBox.Items.IndexOf(row);
+            if (index >= 0)
+            {
+                _entriesListBox.SetSelected(index, true);
+            }
+        }
+
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        if (rows.Count > 0)
+        {
+            _entriesListBox.DoDragDrop(new RepositoryDragPayload(rows), DragDropEffects.Move);
+        }
+    }
+
+    private void CompleteDrag(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(RepositoryDragPayload)) is not RepositoryDragPayload payload)
+        {
+            return;
+        }
+
+        var clientPoint = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var targetIndex = _entriesListBox.IndexFromPoint(clientPoint);
+        if (targetIndex < 0 || _entriesListBox.Items[targetIndex] is not RepositoryManagerRow targetRow)
+        {
+            return;
+        }
+
+        if (payload.Groups.Count > 0)
+        {
+            if (targetRow.Group is not null)
+            {
+                MoveGroupsByDrag(payload.Groups, targetRow.Group);
+            }
+
+            return;
+        }
+
+        if (payload.Entries.Count == 0)
+        {
+            return;
+        }
+
+        var targetGroupId = targetRow.Group?.Id ?? targetRow.Entry?.GroupId;
+        foreach (var entry in payload.Entries)
+        {
+            entry.GroupId = targetGroupId;
+        }
+
+        NormalizeOrders();
+        RefreshEntriesList(payload.Entries.FirstOrDefault()?.RepoRootPath);
+    }
+
+    private void MoveGroupsByDrag(IReadOnlyList<RepositoryGroup> selectedGroups, RepositoryGroup targetGroup)
+    {
+        if (selectedGroups.Contains(targetGroup))
+        {
+            return;
+        }
+
+        var movingGroups = _groups.Where(selectedGroups.Contains).ToList();
+        if (movingGroups.Count == 0)
+        {
+            return;
+        }
+
+        _groups.RemoveAll(selectedGroups.Contains);
+        var targetIndex = _groups.IndexOf(targetGroup);
+        if (targetIndex < 0)
+        {
+            return;
+        }
+
+        _groups.InsertRange(targetIndex, movingGroups);
+        NormalizeOrders();
+        RefreshEntriesList(null, movingGroups.Select(group => group.Id));
+    }
     private void EnforceSelectionType()
     {
         if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
@@ -364,6 +471,19 @@ internal sealed class RepositoryListManagerForm : Form
         Close();
     }
 
+    private sealed class RepositoryDragPayload
+    {
+        public RepositoryDragPayload(IReadOnlyList<RepositoryManagerRow> rows)
+        {
+            Rows = rows;
+            Entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+            Groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        }
+
+        public IReadOnlyList<RepositoryManagerRow> Rows { get; }
+        public IReadOnlyList<RepositoryEntry> Entries { get; }
+        public IReadOnlyList<RepositoryGroup> Groups { get; }
+    }
     private sealed class RepositoryManagerRow
     {
         public RepositoryGroup? Group { get; }
