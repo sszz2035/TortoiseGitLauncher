@@ -73,11 +73,22 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         {
             _dragStartPoint = eventArgs.Location;
             var index = _entriesListBox.IndexFromPoint(eventArgs.Location);
-            _dragCandidateRows = index >= 0 && _entriesListBox.SelectedIndices.Contains(index)
-                ? _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList()
-                : null;
-        };
-        _entriesListBox.MouseMove += (_, eventArgs) =>
+            if (index < 0 || !_entriesListBox.SelectedIndices.Contains(index))
+            {
+                _dragCandidateRows = null;
+                return;
+            }
+
+            var candidateRows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+            _dragCandidateRows = candidateRows;
+            BeginInvoke((Action)(() =>
+            {
+                if (ReferenceEquals(_dragCandidateRows, candidateRows))
+                {
+                    RestoreDragCandidateSelection(candidateRows);
+                }
+            }));
+        };        _entriesListBox.MouseMove += (_, eventArgs) =>
         {
             if (eventArgs.Button != MouseButtons.Left ||
                 (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
@@ -210,6 +221,23 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         UpdateEditorFromSelection();
     }
 
+    private void RestoreDragCandidateSelection(IReadOnlyList<ManagerRow> candidateRows)
+    {
+        if (IsDisposed || Disposing)
+        {
+            return;
+        }
+
+        _entriesListBox.ClearSelected();
+        foreach (var candidateRow in candidateRows)
+        {
+            var candidateIndex = _entriesListBox.Items.IndexOf(candidateRow);
+            if (candidateIndex >= 0)
+            {
+                _entriesListBox.SetSelected(candidateIndex, true);
+            }
+        }
+    }
     private void BeginDrag(object? item)
     {
         if (item is not ManagerRow row) return;
