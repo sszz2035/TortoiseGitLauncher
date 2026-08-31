@@ -564,6 +564,8 @@ internal sealed partial class MainForm : Form
 
         _repositoryEntries.Clear();
         _repositoryEntries.AddRange(dialog.GetEntries());
+        _repositorySettings.Groups.Clear();
+        _repositorySettings.Groups.AddRange(dialog.GetGroups());
         RepositoryHistoryStore.Save(_repositorySettings);
 
         var selectedPath = dialog.SelectedRepoRootPath;
