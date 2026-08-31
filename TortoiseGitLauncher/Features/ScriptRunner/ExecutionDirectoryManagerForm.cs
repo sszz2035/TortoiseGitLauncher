@@ -16,6 +16,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
     private Point _dragStartPoint;
+    private List<ManagerRow>? _dragCandidateRows;
 
     public string? SelectedDirectoryPath { get; private set; }
 
@@ -68,7 +69,14 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
         _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
-        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseDown += (_, eventArgs) =>
+        {
+            _dragStartPoint = eventArgs.Location;
+            var index = _entriesListBox.IndexFromPoint(eventArgs.Location);
+            _dragCandidateRows = index >= 0 && _entriesListBox.SelectedIndices.Contains(index)
+                ? _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList()
+                : null;
+        };
         _entriesListBox.MouseMove += (_, eventArgs) =>
         {
             if (eventArgs.Button != MouseButtons.Left ||
@@ -79,13 +87,25 @@ internal sealed class ExecutionDirectoryManagerForm : Form
             }
 
             var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
-            if (dragIndex >= 0)
+            if (dragIndex < 0)
             {
-                BeginDrag(_entriesListBox.Items[dragIndex]);
+                return;
             }
-        };
-        _entriesListBox.AllowDrop = true;
-        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
+
+            if (_dragCandidateRows is { Count: > 0 })
+            {
+                var candidateRows = _dragCandidateRows;
+                _dragCandidateRows = null;
+                _entriesListBox.ClearSelected();
+                foreach (var candidateRow in candidateRows)
+                {
+                    var candidateIndex = _entriesListBox.Items.IndexOf(candidateRow);
+                    if (candidateIndex >= 0) _entriesListBox.SetSelected(candidateIndex, true);
+                }
+            }
+
+            BeginDrag(_entriesListBox.Items[dragIndex]);
+        };        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
         _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
         _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
         _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
