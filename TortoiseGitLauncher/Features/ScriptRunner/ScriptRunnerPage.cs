@@ -669,6 +669,7 @@ internal sealed class ScriptRunnerPage : UserControl
     {
         using var dialog = new ExecutionDirectoryManagerForm(
             _settings.RecentDirectories,
+            _settings.DirectoryGroups,
             _selectedDirectory?.DirectoryPath);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
@@ -677,6 +678,8 @@ internal sealed class ScriptRunnerPage : UserControl
 
         _settings.RecentDirectories.Clear();
         _settings.RecentDirectories.AddRange(dialog.GetEntries());
+        _settings.DirectoryGroups.Clear();
+        _settings.DirectoryGroups.AddRange(dialog.GetGroups());
 
         var selectedEntry = string.IsNullOrWhiteSpace(dialog.SelectedDirectoryPath)
             ? null
