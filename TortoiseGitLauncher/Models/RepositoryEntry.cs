@@ -62,3 +62,22 @@ internal sealed class RepositoryEntry
 
     public override string ToString() => DisplayLabel;
 }
+internal sealed class RepositoryGroupComboItem(RepositoryGroup group)
+{
+    public RepositoryGroup Group { get; } = group;
+
+    public override string ToString() =>
+        $"{(Group.IsExpanded ? "▼" : "▶")} {Group.Name}";
+}
+
+internal sealed class RepositoryEntryComboItem(RepositoryEntry entry, bool indented)
+{
+    public RepositoryEntry Entry { get; } = entry;
+
+    public bool Indented { get; } = indented;
+
+    public override string ToString() =>
+        Indented
+            ? $"    {Entry.DisplayLabel}"
+            : Entry.DisplayLabel;
+}

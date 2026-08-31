@@ -120,8 +120,21 @@ internal sealed partial class MainForm : Form
             DropDownStyle = ComboBoxStyle.DropDownList,
             IntegralHeight = false,
             MaxDropDownItems = 12,
+            FormattingEnabled = true,
+            DropDownWidth = 720,
             Margin = new Padding(0, 0, 12, 0),
             Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point)
+        };
+        _repoRootComboBox.Format += (_, eventArgs) =>
+        {
+            if (eventArgs.ListItem is RepositoryGroupComboItem groupItem)
+            {
+                eventArgs.Value = groupItem.ToString();
+            }
+            else if (eventArgs.ListItem is RepositoryEntryComboItem entryItem)
+            {
+                eventArgs.Value = entryItem.ToString();
+            }
         };
         _repoRootComboBox.SelectedIndexChanged += (_, _) => SelectRepoRootFromComboBox();
         selectionRow.Controls.Add(_repoRootComboBox, 0, 0);
@@ -551,7 +564,7 @@ internal sealed partial class MainForm : Form
 
         _repositoryEntries.Clear();
         _repositoryEntries.AddRange(dialog.GetEntries());
-        RepositoryHistoryStore.Save(_repositoryEntries);
+        RepositoryHistoryStore.Save(_repositorySettings);
 
         var selectedPath = dialog.SelectedRepoRootPath;
         var selectedEntry = selectedPath is null ? null : FindRepositoryEntryByPath(selectedPath);
@@ -577,12 +590,29 @@ internal sealed partial class MainForm : Form
             return;
         }
 
-        if (_repoRootComboBox.SelectedItem is RepositoryEntry entry)
+        if (_repoRootComboBox.SelectedItem is RepositoryGroupComboItem groupItem)
+        {
+            groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
+            RepositoryHistoryStore.Save(_repositorySettings);
+            var selectedPath = _selectedRepository?.RepoRootPath;
+            BeginInvoke((Action)(() =>
+            {
+                if (IsDisposed || Disposing)
+                {
+                    return;
+                }
+
+                RefreshRepoRootComboBox(selectedPath);
+                _repoRootComboBox.DroppedDown = true;
+            }));
+            return;
+        }
+
+        if (TryGetRepositoryComboEntry(_repoRootComboBox.SelectedItem, out var entry))
         {
             SelectRepositoryEntry(entry, "已从下拉框切换仓库根目录。", moveToTop: false, saveImmediately: false);
         }
     }
-
     private void SelectRepositoryEntry(RepositoryEntry entry, string statusMessage, bool moveToTop, bool saveImmediately)
     {
         if (moveToTop)
@@ -670,9 +700,47 @@ internal sealed partial class MainForm : Form
             _repoRootComboBox.BeginUpdate();
             _repoRootComboBox.Items.Clear();
 
-            foreach (var entry in _repositoryEntries)
+            var groupedEntries = _repositoryEntries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.GroupId))
+                .GroupBy(entry => entry.GroupId!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group
+                    .OrderBy(entry => entry.DisplayOrder)
+                    .ToList(), StringComparer.OrdinalIgnoreCase);
+            var topLevelItems = new List<(int Order, int Kind, object Item)>();
+            foreach (var group in _repositorySettings.Groups
+                         .OrderBy(group => group.DisplayOrder))
             {
-                _repoRootComboBox.Items.Add(entry);
+                topLevelItems.Add((
+                    group.DisplayOrder,
+                    0,
+                    new RepositoryGroupComboItem(group)));
+            }
+
+            foreach (var entry in _repositoryEntries
+                         .Where(entry => string.IsNullOrWhiteSpace(entry.GroupId))
+                         .OrderBy(entry => entry.DisplayOrder))
+            {
+                topLevelItems.Add((
+                    entry.DisplayOrder,
+                    1,
+                    new RepositoryEntryComboItem(entry, indented: false)));
+            }
+
+            foreach (var item in topLevelItems
+                         .OrderBy(item => item.Order)
+                         .ThenBy(item => item.Kind))
+            {
+                _repoRootComboBox.Items.Add(item.Item);
+                if (item.Item is RepositoryGroupComboItem groupItem &&
+                    groupItem.Group.IsExpanded &&
+                    groupedEntries.TryGetValue(groupItem.Group.Id, out var entries))
+                {
+                    foreach (var entry in entries)
+                    {
+                        _repoRootComboBox.Items.Add(
+                            new RepositoryEntryComboItem(entry, indented: true));
+                    }
+                }
             }
 
             if (selectedRepoRootPath is not null)
@@ -682,8 +750,13 @@ internal sealed partial class MainForm : Form
 
                 for (var index = 0; index < _repoRootComboBox.Items.Count; index++)
                 {
-                    if (_repoRootComboBox.Items[index] is RepositoryEntry entry &&
-                        string.Equals(entry.RepoRootPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                    if (TryGetRepositoryComboEntry(
+                            _repoRootComboBox.Items[index],
+                            out var entry) &&
+                        string.Equals(
+                            entry.RepoRootPath,
+                            normalizedPath,
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         selectedIndex = index;
                         break;
@@ -704,6 +777,25 @@ internal sealed partial class MainForm : Form
         }
     }
 
+    private static bool TryGetRepositoryComboEntry(
+        object? item,
+        out RepositoryEntry entry)
+    {
+        if (item is RepositoryEntryComboItem entryItem)
+        {
+            entry = entryItem.Entry;
+            return true;
+        }
+
+        if (item is RepositoryEntry directEntry)
+        {
+            entry = directEntry;
+            return true;
+        }
+
+        entry = null!;
+        return false;
+    }
     private void ExecuteTortoiseGitCommand(CommandButton command)
     {
         if (_selectedRepository is null)

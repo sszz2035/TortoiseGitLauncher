@@ -15,6 +15,7 @@ internal sealed partial class MainForm : Form
     private ComboBox _repoRootComboBox = null!;
     private Label _statusValue = null!;
     private readonly string _launchDirectory;
+    private readonly RepositoryHistorySettings _repositorySettings;
     private readonly List<RepositoryEntry> _repositoryEntries;
     private string _selectedDirectory;
     private RepositoryEntry? _selectedRepository;
@@ -50,7 +51,8 @@ internal sealed partial class MainForm : Form
     {
         _launchDirectory = Environment.CurrentDirectory;
         _selectedDirectory = _launchDirectory;
-        _repositoryEntries = RepositoryHistoryStore.Load();
+        _repositorySettings = RepositoryHistoryStore.LoadSettings(out var repositoryLoadWarning);
+        _repositoryEntries = _repositorySettings.Entries;
 
         var detectedRepoRoot = GitPathHelper.FindRepositoryRoot(_launchDirectory);
         RepositoryEntry? initialSelection = null;
@@ -67,12 +69,16 @@ internal sealed partial class MainForm : Form
                 saveLoadedEntries = true;
             }
 
-            initialStatus = "已自动定位到当前仓库根目录。";
+            initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
+                ? "已自动定位到当前仓库根目录。"
+                : repositoryLoadWarning;
         }
         else if (_repositoryEntries.Count > 0)
         {
             initialSelection = _repositoryEntries[0];
-            initialStatus = "已载入最近使用的仓库根目录。";
+            initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
+                ? "已载入最近使用的仓库根目录。"
+                : repositoryLoadWarning;
         }
         else
         {
@@ -108,7 +114,7 @@ internal sealed partial class MainForm : Form
             SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false, saveImmediately: false);
             if (saveLoadedEntries)
             {
-                RepositoryHistoryStore.Save(_repositoryEntries);
+                RepositoryHistoryStore.Save(_repositorySettings);
             }
         }
         else
