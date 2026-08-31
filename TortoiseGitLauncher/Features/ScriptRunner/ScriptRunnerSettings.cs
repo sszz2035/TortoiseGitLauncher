@@ -66,3 +66,22 @@ internal sealed class ExecutionDirectoryEntry
 
     public override string ToString() => DisplayLabel;
 }
+internal sealed class ExecutionDirectoryGroupComboItem(ExecutionDirectoryGroup group)
+{
+    public ExecutionDirectoryGroup Group { get; } = group;
+
+    public override string ToString() =>
+        $"{(Group.IsExpanded ? "▼" : "▶")} {Group.Name}";
+}
+
+internal sealed class ExecutionDirectoryEntryComboItem(ExecutionDirectoryEntry entry, bool indented)
+{
+    public ExecutionDirectoryEntry Entry { get; } = entry;
+
+    public bool Indented { get; } = indented;
+
+    public override string ToString() =>
+        Indented
+            ? $"    {Entry.DisplayLabel}"
+            : Entry.DisplayLabel;
+}
