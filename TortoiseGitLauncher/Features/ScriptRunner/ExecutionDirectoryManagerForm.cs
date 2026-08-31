@@ -41,7 +41,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.Controls.Add(new Label
         {
-            Text = "可创建分组并整理执行目录。按 Ctrl 或 Shift 多选同类项目后，可批量移动、删除或调整顺序。",
+            Text = "可创建分组并整理执行目录。先按 Ctrl 或 Shift 选中普通项，再点击“新建分组”可自动归入新组。",
             AutoSize = true,
             MaximumSize = new Size(980, 0),
             Margin = new Padding(0, 0, 0, 12)
@@ -99,9 +99,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         var renameGroupButton = CreateDialogButton("重命名分组", Color.FromArgb(242, 246, 240));
         renameGroupButton.Click += (_, _) => RenameSelectedGroup();
         groupButtonsPanel.Controls.Add(renameGroupButton);
-        var toggleGroupButton = CreateDialogButton("展开/收起", Color.FromArgb(233, 242, 255));
-        toggleGroupButton.Click += (_, _) => ToggleSelectedGroup();
-        groupButtonsPanel.Controls.Add(toggleGroupButton);
         leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
         var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
@@ -311,10 +308,12 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         var name = baseName;
         var suffix = 2;
         while (_groups.Any(group => string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase))) name = $"{baseName} ({suffix++})";
-        _groups.Add(new ExecutionDirectoryGroup { Name = name, DisplayOrder = _groups.Count, IsExpanded = true });
-        RefreshEntriesList(null, new[] { _groups[^1].Id });
+        var selectedEntries = GetSelectedEntries();
+        var newGroup = new ExecutionDirectoryGroup { Name = name, DisplayOrder = _groups.Count, IsExpanded = true };
+        _groups.Add(newGroup);
+        foreach (var entry in selectedEntries) entry.GroupId = newGroup.Id;
+        RefreshEntriesList(selectedEntries.FirstOrDefault()?.DirectoryPath, new[] { newGroup.Id });
     }
-
     private void RenameSelectedGroup()
     {
         var row = GetSingleSelectedRow();
