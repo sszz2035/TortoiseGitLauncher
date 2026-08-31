@@ -11,7 +11,6 @@ internal sealed class RepositoryListManagerForm : Form
     private readonly TextBox _displayNameTextBox;
     private readonly TextBox _pathTextBox;
     private readonly TextBox _groupNameTextBox;
-    private readonly ComboBox _moveGroupComboBox;
     private readonly Label _summaryLabel;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
@@ -113,9 +112,6 @@ internal sealed class RepositoryListManagerForm : Form
         var createGroupButton = CreateDialogButton("新建分组", Color.FromArgb(242, 246, 240));
         createGroupButton.Click += (_, _) => CreateGroup();
         groupButtonsPanel.Controls.Add(createGroupButton);
-        var renameGroupButton = CreateDialogButton("重命名分组", Color.FromArgb(242, 246, 240));
-        renameGroupButton.Click += (_, _) => RenameSelectedGroup();
-        groupButtonsPanel.Controls.Add(renameGroupButton);
         leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
         var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
@@ -128,11 +124,6 @@ internal sealed class RepositoryListManagerForm : Form
         var deleteButton = CreateDialogButton("删除选中", Color.FromArgb(249, 237, 235));
         deleteButton.Click += (_, _) => DeleteSelectedItems();
         operationPanel.Controls.Add(deleteButton);
-        _moveGroupComboBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Margin = new Padding(10, 4, 6, 0) };
-        operationPanel.Controls.Add(_moveGroupComboBox);
-        var moveButton = CreateDialogButton("移动到分组", Color.FromArgb(233, 242, 255));
-        moveButton.Click += (_, _) => MoveSelectedEntriesToGroup();
-        operationPanel.Controls.Add(moveButton);
         leftPanel.Controls.Add(operationPanel, 0, 3);
         contentLayout.Controls.Add(leftPanel, 0, 0);
 
@@ -212,10 +203,6 @@ internal sealed class RepositoryListManagerForm : Form
             _entriesListBox.Items.Add(new RepositoryManagerRow(entry, false));
         _entriesListBox.EndUpdate();
         _summaryLabel.Text = $"共 {_entries.Count} 个仓库项，{_groups.Count} 个分组";
-        _moveGroupComboBox.Items.Clear();
-        _moveGroupComboBox.Items.Add(new GroupChoice(null, "未分组"));
-        foreach (var group in _groups.OrderBy(group => group.DisplayOrder)) _moveGroupComboBox.Items.Add(new GroupChoice(group.Id, group.Name));
-        _moveGroupComboBox.SelectedIndex = 0;
         for (var index = 0; index < _entriesListBox.Items.Count; index++)
         {
             if (_entriesListBox.Items[index] is not RepositoryManagerRow row) continue;
@@ -418,14 +405,6 @@ internal sealed class RepositoryListManagerForm : Form
             for (var i = indexes.Count - 1; i >= 0; i--) { var index = indexes[i]; (ordered[index + 1], ordered[index]) = (ordered[index], ordered[index + 1]); }
         }
         for (var index = 0; index < ordered.Count; index++) ordered[index].DisplayOrder = index;
-        RefreshEntriesList(selected.FirstOrDefault()?.RepoRootPath);
-    }
-
-    private void MoveSelectedEntriesToGroup()
-    {
-        var selected = GetSelectedEntries();
-        if (selected.Count == 0 || _moveGroupComboBox.SelectedItem is not GroupChoice choice) return;
-        foreach (var entry in selected) entry.GroupId = choice.Id;
         RefreshEntriesList(selected.FirstOrDefault()?.RepoRootPath);
     }
 

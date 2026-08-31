@@ -13,7 +13,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     private readonly TextBox _pathTextBox;
     private readonly Label _pathStatusLabel;
     private readonly Label _summaryLabel;
-    private readonly ComboBox _moveGroupComboBox;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
     private Point _dragStartPoint;
@@ -96,9 +95,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         var createGroupButton = CreateDialogButton("新建分组", Color.FromArgb(242, 246, 240));
         createGroupButton.Click += (_, _) => CreateGroup();
         groupButtonsPanel.Controls.Add(createGroupButton);
-        var renameGroupButton = CreateDialogButton("重命名分组", Color.FromArgb(242, 246, 240));
-        renameGroupButton.Click += (_, _) => RenameSelectedGroup();
-        groupButtonsPanel.Controls.Add(renameGroupButton);
         leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
         var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
@@ -111,11 +107,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         var deleteButton = CreateDialogButton("删除选中", Color.FromArgb(249, 237, 235));
         deleteButton.Click += (_, _) => DeleteSelectedItems();
         operationPanel.Controls.Add(deleteButton);
-        _moveGroupComboBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Margin = new Padding(10, 4, 6, 0) };
-        operationPanel.Controls.Add(_moveGroupComboBox);
-        var moveButton = CreateDialogButton("移动到分组", Color.FromArgb(233, 242, 255));
-        moveButton.Click += (_, _) => MoveSelectedEntriesToGroup();
-        operationPanel.Controls.Add(moveButton);
         leftPanel.Controls.Add(operationPanel, 0, 3);
         contentLayout.Controls.Add(leftPanel, 0, 0);
 
@@ -189,10 +180,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
             _entriesListBox.Items.Add(new ManagerRow(entry, false));
         _entriesListBox.EndUpdate();
         _summaryLabel.Text = $"共 {_entries.Count} 个执行目录，{_groups.Count} 个分组";
-        _moveGroupComboBox.Items.Clear();
-        _moveGroupComboBox.Items.Add(new GroupChoice(null, "未分组"));
-        foreach (var group in _groups.OrderBy(group => group.DisplayOrder)) _moveGroupComboBox.Items.Add(new GroupChoice(group.Id, group.Name));
-        _moveGroupComboBox.SelectedIndex = 0;
         for (var index = 0; index < _entriesListBox.Items.Count; index++)
         {
             if (_entriesListBox.Items[index] is not ManagerRow row) continue;
@@ -357,14 +344,6 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         if (offset < 0) { if (indexesEntries[0] == 0) return; foreach (var index in indexesEntries) (ordered[index - 1], ordered[index]) = (ordered[index], ordered[index - 1]); }
         else { if (indexesEntries[^1] >= ordered.Count - 1) return; for (var index = indexesEntries.Count - 1; index >= 0; index--) { var entryIndex = indexesEntries[index]; (ordered[entryIndex + 1], ordered[entryIndex]) = (ordered[entryIndex], ordered[entryIndex + 1]); } }
         for (var index = 0; index < ordered.Count; index++) ordered[index].DisplayOrder = index;
-        RefreshEntriesList(entries.FirstOrDefault()?.DirectoryPath);
-    }
-
-    private void MoveSelectedEntriesToGroup()
-    {
-        var entries = GetSelectedEntries();
-        if (entries.Count == 0 || _moveGroupComboBox.SelectedItem is not GroupChoice choice) return;
-        foreach (var entry in entries) entry.GroupId = choice.Id;
         RefreshEntriesList(entries.FirstOrDefault()?.DirectoryPath);
     }
 
