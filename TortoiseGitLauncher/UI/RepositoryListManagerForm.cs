@@ -76,7 +76,7 @@ internal sealed class RepositoryListManagerForm : Form
         _summaryLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
         leftPanel.Controls.Add(_summaryLabel, 0, 0);
 
-        _entriesListBox = new ListBox
+        _entriesListBox = new MultiSelectListBox
         {
             Dock = DockStyle.Fill,
             IntegralHeight = false,
@@ -497,6 +497,32 @@ internal sealed class RepositoryListManagerForm : Form
         Close();
     }
 
+    private sealed class MultiSelectListBox : ListBox
+    {
+        private const int WmLButtonDown = 0x0201;
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmLButtonDown && ModifierKeys == Keys.None)
+            {
+                var index = IndexFromPoint(PointToClient(Cursor.Position));
+                if (index >= 0 && SelectedIndices.Contains(index))
+                {
+                    var selectedItems = SelectedItems.Cast<object>().ToList();
+                    base.WndProc(ref message);
+                    ClearSelected();
+                    foreach (var selectedItem in selectedItems)
+                    {
+                        var selectedIndex = Items.IndexOf(selectedItem);
+                        if (selectedIndex >= 0) SetSelected(selectedIndex, true);
+                    }
+                    return;
+                }
+            }
+
+            base.WndProc(ref message);
+        }
+    }
     private sealed class RepositoryDragPayload
     {
         public RepositoryDragPayload(IReadOnlyList<RepositoryManagerRow> rows)
