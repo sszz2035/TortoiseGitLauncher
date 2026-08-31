@@ -23,7 +23,7 @@ internal sealed partial class MainForm : Form
     private static readonly CommandButton[] CommandButtons =
     [
         new("提交", "commit", CommandScope.WorkingDirectory),
-        new("比较差异", "diff", CommandScope.WorkingDirectory),
+        new("比较差异", "showcompare", CommandScope.WorkingDirectory),
         new("日志", "log", CommandScope.WorkingDirectory),
         new("同步", "sync", CommandScope.RepositoryRoot),
         new("拉取", "pull", CommandScope.RepositoryRoot),
