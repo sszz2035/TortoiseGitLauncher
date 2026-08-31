@@ -86,7 +86,8 @@ internal sealed class RepositoryListManagerForm : Form
             Margin = new Padding(0, 0, 0, 10)
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
-        _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
+        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
         _entriesListBox.MouseMove += (_, eventArgs) =>
         {
             if (eventArgs.Button != MouseButtons.Left ||
@@ -102,8 +103,8 @@ internal sealed class RepositoryListManagerForm : Form
                 BeginDrag(_entriesListBox.Items[dragIndex]);
             }
         };
-        _entriesListBox.DragEnter += (_, eventArgs) => eventArgs.Effect = eventArgs.Data?.GetDataPresent(typeof(RepositoryDragPayload)) == true ? DragDropEffects.Move : DragDropEffects.None;
-        _entriesListBox.DragOver += (_, eventArgs) => eventArgs.Effect = eventArgs.Data?.GetDataPresent(typeof(RepositoryDragPayload)) == true ? DragDropEffects.Move : DragDropEffects.None;
+        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
         _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
         _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
@@ -252,45 +253,43 @@ internal sealed class RepositoryListManagerForm : Form
         }
     }
 
-    private void CompleteDrag(DragEventArgs eventArgs)
+    private void UpdateDragEffect(DragEventArgs eventArgs)
     {
         if (eventArgs.Data?.GetData(typeof(RepositoryDragPayload)) is not RepositoryDragPayload payload)
         {
+            eventArgs.Effect = DragDropEffects.None;
             return;
         }
 
-        var clientPoint = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
-        var targetIndex = _entriesListBox.IndexFromPoint(clientPoint);
-        if (targetIndex < 0 || _entriesListBox.Items[targetIndex] is not RepositoryManagerRow targetRow)
-        {
-            return;
-        }
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as RepositoryManagerRow : null;
+        eventArgs.Effect = payload.Groups.Count > 0
+            ? targetRow?.Group is not null && !payload.Groups.Contains(targetRow.Group)
+                ? DragDropEffects.Move
+                : DragDropEffects.None
+            : payload.Entries.Count > 0
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+    }
 
+    private void CompleteDrag(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(RepositoryDragPayload)) is not RepositoryDragPayload payload) return;
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as RepositoryManagerRow : null;
         if (payload.Groups.Count > 0)
         {
-            if (targetRow.Group is not null)
-            {
-                MoveGroupsByDrag(payload.Groups, targetRow.Group);
-            }
-
+            if (targetRow?.Group is not null) MoveGroupsByDrag(payload.Groups, targetRow.Group);
             return;
         }
-
-        if (payload.Entries.Count == 0)
-        {
-            return;
-        }
-
-        var targetGroupId = targetRow.Group?.Id ?? targetRow.Entry?.GroupId;
-        foreach (var entry in payload.Entries)
-        {
-            entry.GroupId = targetGroupId;
-        }
-
+        if (payload.Entries.Count == 0) return;
+        var targetGroupId = targetRow?.Group?.Id ?? targetRow?.Entry?.GroupId;
+        foreach (var entry in payload.Entries) entry.GroupId = targetGroupId;
         NormalizeOrders();
         RefreshEntriesList(payload.Entries.FirstOrDefault()?.RepoRootPath);
     }
-
     private void MoveGroupsByDrag(IReadOnlyList<RepositoryGroup> selectedGroups, RepositoryGroup targetGroup)
     {
         if (selectedGroups.Contains(targetGroup))

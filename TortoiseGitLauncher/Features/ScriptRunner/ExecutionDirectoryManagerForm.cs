@@ -16,6 +16,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     private readonly ComboBox _moveGroupComboBox;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
+    private Point _dragStartPoint;
 
     public string? SelectedDirectoryPath { get; private set; }
 
@@ -68,6 +69,26 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
         _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
+        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseMove += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Left ||
+                (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
+                 Math.Abs(eventArgs.Y - _dragStartPoint.Y) < SystemInformation.DragSize.Height / 2))
+            {
+                return;
+            }
+
+            var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
+            if (dragIndex >= 0)
+            {
+                BeginDrag(_entriesListBox.Items[dragIndex]);
+            }
+        };
+        _entriesListBox.AllowDrop = true;
+        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
         _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
 
@@ -185,6 +206,68 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         UpdateEditorFromSelection();
     }
 
+    private void BeginDrag(object? item)
+    {
+        if (item is not ManagerRow row) return;
+        if (!_entriesListBox.SelectedItems.Contains(row))
+        {
+            _entriesListBox.ClearSelected();
+            var index = _entriesListBox.Items.IndexOf(row);
+            if (index >= 0) _entriesListBox.SetSelected(index, true);
+        }
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        if (rows.Count > 0) _entriesListBox.DoDragDrop(new DirectoryDragPayload(rows), DragDropEffects.Move);
+    }
+
+    private void UpdateDragEffect(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(DirectoryDragPayload)) is not DirectoryDragPayload payload)
+        {
+            eventArgs.Effect = DragDropEffects.None;
+            return;
+        }
+
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as ManagerRow : null;
+        eventArgs.Effect = payload.Groups.Count > 0
+            ? targetRow?.Group is not null && !payload.Groups.Contains(targetRow.Group)
+                ? DragDropEffects.Move
+                : DragDropEffects.None
+            : payload.Entries.Count > 0
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+    }
+
+    private void CompleteDrag(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(DirectoryDragPayload)) is not DirectoryDragPayload payload) return;
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as ManagerRow : null;
+        if (payload.Groups.Count > 0)
+        {
+            if (targetRow?.Group is not null) MoveGroupsByDrag(payload.Groups, targetRow.Group);
+            return;
+        }
+        if (payload.Entries.Count == 0) return;
+        var targetGroupId = targetRow?.Group?.Id ?? targetRow?.Entry?.GroupId;
+        foreach (var entry in payload.Entries) entry.GroupId = targetGroupId;
+        NormalizeOrders();
+        RefreshEntriesList(payload.Entries.FirstOrDefault()?.DirectoryPath);
+    }
+    private void MoveGroupsByDrag(IReadOnlyList<ExecutionDirectoryGroup> selectedGroups, ExecutionDirectoryGroup targetGroup)
+    {
+        if (selectedGroups.Contains(targetGroup)) return;
+        var movingGroups = _groups.Where(selectedGroups.Contains).ToList();
+        if (movingGroups.Count == 0) return;
+        _groups.RemoveAll(selectedGroups.Contains);
+        var targetIndex = _groups.IndexOf(targetGroup);
+        if (targetIndex < 0) return;
+        _groups.InsertRange(targetIndex, movingGroups);
+        NormalizeOrders();
+        RefreshEntriesList(null, movingGroups.Select(group => group.Id));
+    }
     private void EnforceSelectionType()
     {
         if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
@@ -326,6 +409,16 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         Close();
     }
 
+    private sealed class DirectoryDragPayload
+    {
+        public DirectoryDragPayload(IReadOnlyList<ManagerRow> rows)
+        {
+            Entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+            Groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        }
+        public IReadOnlyList<ExecutionDirectoryEntry> Entries { get; }
+        public IReadOnlyList<ExecutionDirectoryGroup> Groups { get; }
+    }
     private sealed class ManagerRow
     {
         public ExecutionDirectoryGroup? Group { get; }
