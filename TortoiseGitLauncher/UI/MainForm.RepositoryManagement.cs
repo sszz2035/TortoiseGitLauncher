@@ -556,7 +556,7 @@ internal sealed partial class MainForm : Form
 
     private void OpenRepositoryManager()
     {
-        using var dialog = new RepositoryListManagerForm(_repositoryEntries, _selectedRepository?.RepoRootPath);
+        using var dialog = new RepositoryListManagerForm(_repositoryEntries, _repositorySettings.Groups, _selectedRepository?.RepoRootPath);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
             return;
@@ -627,7 +627,7 @@ internal sealed partial class MainForm : Form
 
         if (saveImmediately)
         {
-            RepositoryHistoryStore.Save(_repositoryEntries);
+            RepositoryHistoryStore.Save(_repositorySettings);
         }
 
         SetStatus($"{statusMessage} 当前仓库根目录: {_selectedRepository.RepoRootPath}", isError: false);
