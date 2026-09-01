@@ -15,7 +15,6 @@ internal sealed class RepositoryListManagerForm : Form
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
     private Point _dragStartPoint;
-    private List<RepositoryManagerRow>? _dragCandidateRows;
 
     public string? SelectedRepoRootPath { get; private set; }
 
@@ -87,26 +86,8 @@ internal sealed class RepositoryListManagerForm : Form
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
         _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
-        _entriesListBox.MouseDown += (_, eventArgs) =>
-        {
-            _dragStartPoint = eventArgs.Location;
-            var index = _entriesListBox.IndexFromPoint(eventArgs.Location);
-            if (index < 0 || !_entriesListBox.SelectedIndices.Contains(index))
-            {
-                _dragCandidateRows = null;
-                return;
-            }
-
-            var candidateRows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
-            _dragCandidateRows = candidateRows;
-            BeginInvoke((Action)(() =>
-            {
-                if (ReferenceEquals(_dragCandidateRows, candidateRows))
-                {
-                    RestoreDragCandidateSelection(candidateRows);
-                }
-            }));
-        };        _entriesListBox.MouseMove += (_, eventArgs) =>
+        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseMove += (_, eventArgs) =>
         {
             if (eventArgs.Button != MouseButtons.Left ||
                 (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
@@ -116,24 +97,10 @@ internal sealed class RepositoryListManagerForm : Form
             }
 
             var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
-            if (dragIndex < 0)
+            if (dragIndex >= 0)
             {
-                return;
+                BeginDrag(_entriesListBox.Items[dragIndex]);
             }
-
-            if (_dragCandidateRows is { Count: > 0 })
-            {
-                var candidateRows = _dragCandidateRows;
-                _dragCandidateRows = null;
-                _entriesListBox.ClearSelected();
-                foreach (var candidateRow in candidateRows)
-                {
-                    var candidateIndex = _entriesListBox.Items.IndexOf(candidateRow);
-                    if (candidateIndex >= 0) _entriesListBox.SetSelected(candidateIndex, true);
-                }
-            }
-
-            BeginDrag(_entriesListBox.Items[dragIndex]);
         };        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
         _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
         _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
@@ -245,23 +212,6 @@ internal sealed class RepositoryListManagerForm : Form
         UpdateEditorFromSelection();
     }
 
-    private void RestoreDragCandidateSelection(IReadOnlyList<RepositoryManagerRow> candidateRows)
-    {
-        if (IsDisposed || Disposing)
-        {
-            return;
-        }
-
-        _entriesListBox.ClearSelected();
-        foreach (var candidateRow in candidateRows)
-        {
-            var candidateIndex = _entriesListBox.Items.IndexOf(candidateRow);
-            if (candidateIndex >= 0)
-            {
-                _entriesListBox.SetSelected(candidateIndex, true);
-            }
-        }
-    }
     private void BeginDrag(object? item)
     {
         if (item is not RepositoryManagerRow row)
@@ -500,30 +450,54 @@ internal sealed class RepositoryListManagerForm : Form
     private sealed class MultiSelectListBox : ListBox
     {
         private const int WmLButtonDown = 0x0201;
+        private const int WmLButtonUp = 0x0202;
+        private List<object>? _preservedSelectedItems;
 
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == WmLButtonDown && ModifierKeys == Keys.None)
             {
                 var index = IndexFromPoint(PointToClient(Cursor.Position));
-                if (index >= 0 && SelectedIndices.Contains(index))
-                {
-                    var selectedItems = SelectedItems.Cast<object>().ToList();
-                    base.WndProc(ref message);
-                    ClearSelected();
-                    foreach (var selectedItem in selectedItems)
-                    {
-                        var selectedIndex = Items.IndexOf(selectedItem);
-                        if (selectedIndex >= 0) SetSelected(selectedIndex, true);
-                    }
-                    return;
-                }
+                _preservedSelectedItems = index >= 0 &&
+                                            SelectedIndices.Count > 1 &&
+                                            SelectedIndices.Contains(index)
+                    ? SelectedItems.Cast<object>().ToList()
+                    : null;
+
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                return;
+            }
+
+            if (message.Msg == WmLButtonUp && _preservedSelectedItems is not null)
+            {
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                _preservedSelectedItems = null;
+                return;
             }
 
             base.WndProc(ref message);
         }
-    }
-    private sealed class RepositoryDragPayload
+
+        private void RestorePreservedSelection()
+        {
+            if (_preservedSelectedItems is null)
+            {
+                return;
+            }
+
+            ClearSelected();
+            foreach (var selectedItem in _preservedSelectedItems)
+            {
+                var selectedIndex = Items.IndexOf(selectedItem);
+                if (selectedIndex >= 0)
+                {
+                    SetSelected(selectedIndex, true);
+                }
+            }
+        }
+    }    private sealed class RepositoryDragPayload
     {
         public RepositoryDragPayload(IReadOnlyList<RepositoryManagerRow> rows)
         {
