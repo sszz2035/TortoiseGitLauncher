@@ -252,8 +252,14 @@ internal static class RepositoryHistoryStore
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalizedEntries = new List<RepositoryEntry>();
-        foreach (var entry in settings.Entries)
+        var orderedSourceEntries = settings.Entries
+            .Select((entry, sourceIndex) => (Entry: entry, SourceIndex: sourceIndex))
+            .OrderBy(item => item.Entry?.DisplayOrder ?? int.MaxValue)
+            .ThenBy(item => item.SourceIndex)
+            .ToList();
+        foreach (var sourceEntry in orderedSourceEntries)
         {
+            var entry = sourceEntry.Entry;
             if (entry is null || string.IsNullOrWhiteSpace(entry.RepoRootPath))
             {
                 continue;
@@ -282,9 +288,9 @@ internal static class RepositoryHistoryStore
             normalizedEntries.Add(entry);
         }
 
-        settings.Entries = normalizedEntries;
+        settings.Entries.Clear();
+        settings.Entries.AddRange(normalizedEntries);
     }
-
     private static string EnsureUniqueGroupName(
         string? value,
         HashSet<string> usedNames)

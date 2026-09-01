@@ -314,8 +314,14 @@ internal static class ScriptRunnerStore
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalizedEntries = new List<ExecutionDirectoryEntry>();
-        foreach (var entry in settings.RecentDirectories)
+        var orderedSourceEntries = settings.RecentDirectories
+            .Select((entry, sourceIndex) => (Entry: entry, SourceIndex: sourceIndex))
+            .OrderBy(item => item.Entry?.DisplayOrder ?? int.MaxValue)
+            .ThenBy(item => item.SourceIndex)
+            .ToList();
+        foreach (var sourceEntry in orderedSourceEntries)
         {
+            var entry = sourceEntry.Entry;
             if (entry is null || string.IsNullOrWhiteSpace(entry.DirectoryPath))
             {
                 continue;
@@ -351,9 +357,9 @@ internal static class ScriptRunnerStore
                 normalizedEntries.Count - MaxRecentDirectoryCount);
         }
 
-        settings.RecentDirectories = normalizedEntries;
+        settings.RecentDirectories.Clear();
+        settings.RecentDirectories.AddRange(normalizedEntries);
     }
-
     private static string EnsureUniqueGroupName(
         string? value,
         HashSet<string> usedNames)

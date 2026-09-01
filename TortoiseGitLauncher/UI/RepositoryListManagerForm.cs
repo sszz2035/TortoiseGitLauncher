@@ -453,7 +453,9 @@ internal sealed class RepositoryListManagerForm : Form
     {
         for (var index = 0; index < _groups.Count; index++) _groups[index].DisplayOrder = index;
         var ordered = _entries.OrderBy(entry => entry.DisplayOrder).ToList();
-        for (var index = 0; index < ordered.Count; index++) ordered[index].DisplayOrder = index;
+        _entries.Clear();
+        _entries.AddRange(ordered);
+        for (var index = 0; index < _entries.Count; index++) _entries[index].DisplayOrder = index;
     }
 
     private RepositoryManagerRow? GetSingleSelectedRow() => _entriesListBox.SelectedItems.Count == 1 ? _entriesListBox.SelectedItem as RepositoryManagerRow : null;
