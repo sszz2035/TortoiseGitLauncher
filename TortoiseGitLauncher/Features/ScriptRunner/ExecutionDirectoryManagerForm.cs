@@ -165,17 +165,38 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         _isRefreshing = true;
         _entriesListBox.BeginUpdate();
         _entriesListBox.Items.Clear();
+        var groupedEntries = _entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.GroupId))
+            .GroupBy(entry => entry.GroupId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList(), StringComparer.OrdinalIgnoreCase);
+        var topLevelRows = new List<(int Order, int Kind, ManagerRow Row)>();
         foreach (var group in _groups.OrderBy(group => group.DisplayOrder))
         {
-            _entriesListBox.Items.Add(new ManagerRow(group));
-            if (group.IsExpanded)
+            topLevelRows.Add((group.DisplayOrder, 0, new ManagerRow(group)));
+        }
+
+        foreach (var entry in _entries
+                     .Where(entry => string.IsNullOrWhiteSpace(entry.GroupId))
+                     .OrderBy(entry => entry.DisplayOrder))
+        {
+            topLevelRows.Add((entry.DisplayOrder, 1, new ManagerRow(entry, false)));
+        }
+
+        foreach (var item in topLevelRows.OrderBy(item => item.Order).ThenBy(item => item.Kind))
+        {
+            _entriesListBox.Items.Add(item.Row);
+            if (item.Row.Group is not null &&
+                item.Row.Group.IsExpanded &&
+                groupedEntries.TryGetValue(item.Row.Group.Id, out var childEntries))
             {
-                foreach (var entry in _entries.Where(entry => string.Equals(entry.GroupId, group.Id, StringComparison.OrdinalIgnoreCase)).OrderBy(entry => entry.DisplayOrder))
+                foreach (var entry in childEntries)
+                {
                     _entriesListBox.Items.Add(new ManagerRow(entry, true));
+                }
             }
         }
-        foreach (var entry in _entries.Where(entry => string.IsNullOrWhiteSpace(entry.GroupId)).OrderBy(entry => entry.DisplayOrder))
-            _entriesListBox.Items.Add(new ManagerRow(entry, false));
         _entriesListBox.EndUpdate();
         _summaryLabel.Text = $"共 {_entries.Count} 个执行目录，{_groups.Count} 个分组";
         for (var index = 0; index < _entriesListBox.Items.Count; index++)
