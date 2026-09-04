@@ -412,22 +412,45 @@ internal sealed class RepositoryListManagerForm : Form
 
         var selected = GetSelectedEntries();
         if (selected.Count == 0) return;
-        var ordered = _entries.OrderBy(entry => entry.DisplayOrder).ToList();
-        var indexes = selected.Select(entry => ordered.IndexOf(entry)).OrderBy(index => index).ToList();
-        if (offset < 0)
+
+        foreach (var group in selected.GroupBy(entry => entry.GroupId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
         {
-            if (indexes[0] == 0) return;
-            foreach (var index in indexes) (ordered[index - 1], ordered[index]) = (ordered[index], ordered[index - 1]);
+            var groupEntries = _entries
+                .Where(entry => string.Equals(entry.GroupId ?? string.Empty, group.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList();
+            var selectedSet = group.ToHashSet();
+            var indexes = groupEntries
+                .Select((entry, index) => (entry, index))
+                .Where(item => selectedSet.Contains(item.entry))
+                .Select(item => item.index)
+                .OrderBy(index => index)
+                .ToList();
+            if (indexes.Count == 0) continue;
+
+            if (offset < 0)
+            {
+                if (indexes[0] == 0) continue;
+                foreach (var index in indexes)
+                {
+                    (groupEntries[index - 1].DisplayOrder, groupEntries[index].DisplayOrder) =
+                        (groupEntries[index].DisplayOrder, groupEntries[index - 1].DisplayOrder);
+                }
+            }
+            else
+            {
+                if (indexes[^1] >= groupEntries.Count - 1) continue;
+                for (var index = indexes.Count - 1; index >= 0; index--)
+                {
+                    var entryIndex = indexes[index];
+                    (groupEntries[entryIndex + 1].DisplayOrder, groupEntries[entryIndex].DisplayOrder) =
+                        (groupEntries[entryIndex].DisplayOrder, groupEntries[entryIndex + 1].DisplayOrder);
+                }
+            }
         }
-        else
-        {
-            if (indexes[^1] >= ordered.Count - 1) return;
-            for (var i = indexes.Count - 1; i >= 0; i--) { var index = indexes[i]; (ordered[index + 1], ordered[index]) = (ordered[index], ordered[index + 1]); }
-        }
-        for (var index = 0; index < ordered.Count; index++) ordered[index].DisplayOrder = index;
+
         RefreshEntriesList(selected.FirstOrDefault()?.RepoRootPath);
     }
-
     private void DeleteSelectedItems()
     {
         var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();

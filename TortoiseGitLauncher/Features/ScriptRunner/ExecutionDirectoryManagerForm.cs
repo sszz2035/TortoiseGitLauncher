@@ -358,14 +358,45 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         }
         var entries = GetSelectedEntries();
         if (entries.Count == 0) return;
-        var ordered = _entries.OrderBy(entry => entry.DisplayOrder).ToList();
-        var indexesEntries = entries.Select(entry => ordered.IndexOf(entry)).OrderBy(index => index).ToList();
-        if (offset < 0) { if (indexesEntries[0] == 0) return; foreach (var index in indexesEntries) (ordered[index - 1], ordered[index]) = (ordered[index], ordered[index - 1]); }
-        else { if (indexesEntries[^1] >= ordered.Count - 1) return; for (var index = indexesEntries.Count - 1; index >= 0; index--) { var entryIndex = indexesEntries[index]; (ordered[entryIndex + 1], ordered[entryIndex]) = (ordered[entryIndex], ordered[entryIndex + 1]); } }
-        for (var index = 0; index < ordered.Count; index++) ordered[index].DisplayOrder = index;
+
+        foreach (var group in entries.GroupBy(entry => entry.GroupId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            var groupEntries = _entries
+                .Where(entry => string.Equals(entry.GroupId ?? string.Empty, group.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList();
+            var selectedSet = group.ToHashSet();
+            var indexes = groupEntries
+                .Select((entry, index) => (entry, index))
+                .Where(item => selectedSet.Contains(item.entry))
+                .Select(item => item.index)
+                .OrderBy(index => index)
+                .ToList();
+            if (indexes.Count == 0) continue;
+
+            if (offset < 0)
+            {
+                if (indexes[0] == 0) continue;
+                foreach (var index in indexes)
+                {
+                    (groupEntries[index - 1].DisplayOrder, groupEntries[index].DisplayOrder) =
+                        (groupEntries[index].DisplayOrder, groupEntries[index - 1].DisplayOrder);
+                }
+            }
+            else
+            {
+                if (indexes[^1] >= groupEntries.Count - 1) continue;
+                for (var index = indexes.Count - 1; index >= 0; index--)
+                {
+                    var entryIndex = indexes[index];
+                    (groupEntries[entryIndex + 1].DisplayOrder, groupEntries[entryIndex].DisplayOrder) =
+                        (groupEntries[entryIndex].DisplayOrder, groupEntries[entryIndex + 1].DisplayOrder);
+                }
+            }
+        }
+
         RefreshEntriesList(entries.FirstOrDefault()?.DirectoryPath);
     }
-
     private void DeleteSelectedItems()
     {
         var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
