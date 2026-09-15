@@ -189,40 +189,6 @@ internal sealed partial class MainForm : Form
         return card;
     }
 
-    private Control CreateInfoBanner()
-    {
-        var banner = new CardPanel
-        {
-            Dock = DockStyle.Top,
-            FillColor = Color.FromArgb(240, 246, 255),
-            BorderColor = Color.FromArgb(220, 232, 252),
-            CornerRadius = 16,
-            Padding = new Padding(16, 12, 16, 12),
-            Margin = new Padding(0, 0, 0, 14)
-        };
-
-        var row = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            AutoSize = true,
-            BackColor = Color.Transparent
-        };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        row.Controls.Add(CreateSmallIcon(UiIconKind.Info, Color.FromArgb(46, 118, 255), 16), 0, 0);
-        row.Controls.Add(new Label
-        {
-            Text = "下拉框显示的是自定义仓库列表。蓝色按钮对应当前目标目录；绿色按钮使用选中仓库的根目录来执行。命令按钮都固定为统一尺寸，不再出现最后一排被拉宽。",
-            AutoSize = true,
-            MaximumSize = new Size(1040, 0),
-            ForeColor = Color.FromArgb(72, 88, 115),
-            Margin = new Padding(10, 0, 0, 0)
-        }, 1, 0);
-        banner.Controls.Add(row);
-        return banner;
-    }
-
     private Control CreateCommandSectionCard(CommandSection section)
     {
         var card = CreateCardPanel(new Padding(18, 16, 18, 16));
@@ -677,11 +643,6 @@ internal sealed partial class MainForm : Form
                 _repositoryEntries.Remove(existing);
                 _repositoryEntries.Insert(0, existing);
             }
-        }
-
-        if (_repositoryEntries.Count > 20)
-        {
-            _repositoryEntries.RemoveRange(20, _repositoryEntries.Count - 20);
         }
 
         return existing;

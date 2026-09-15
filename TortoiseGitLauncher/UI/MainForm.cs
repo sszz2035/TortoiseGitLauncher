@@ -312,7 +312,6 @@ internal sealed partial class MainForm : Form
 
         contentLayout.Controls.Add(CreatePageHeaderCard());
         contentLayout.Controls.Add(CreateRepositorySelectionCard());
-        contentLayout.Controls.Add(CreateInfoBanner());
 
         foreach (var section in CommandSections)
         {
