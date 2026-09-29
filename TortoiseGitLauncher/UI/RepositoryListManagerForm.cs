@@ -6,22 +6,31 @@ namespace TortoiseGitLauncher;
 internal sealed class RepositoryListManagerForm : Form
 {
     private readonly List<RepositoryEntry> _entries;
+    private readonly List<RepositoryGroup> _groups;
     private readonly ListBox _entriesListBox;
     private readonly TextBox _displayNameTextBox;
     private readonly TextBox _pathTextBox;
+    private readonly TextBox _groupNameTextBox;
     private readonly Label _summaryLabel;
+    private bool _isRefreshing;
+    private bool _isUpdatingSelection;
+    private Point _dragStartPoint;
 
     public string? SelectedRepoRootPath { get; private set; }
 
-    public RepositoryListManagerForm(IEnumerable<RepositoryEntry> entries, string? selectedRepoRootPath)
+    public RepositoryListManagerForm(
+        IEnumerable<RepositoryEntry> entries,
+        IEnumerable<RepositoryGroup> groups,
+        string? selectedRepoRootPath)
     {
         _entries = entries.Select(entry => entry.Clone()).ToList();
+        _groups = groups.Select(group => group.Clone()).ToList();
         SelectedRepoRootPath = selectedRepoRootPath;
 
         Text = "管理仓库列表";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(760, 520);
-        Size = new Size(860, 580);
+        MinimumSize = new Size(900, 600);
+        Size = new Size(1040, 700);
         Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
 
         var rootLayout = new TableLayoutPanel
@@ -36,9 +45,9 @@ internal sealed class RepositoryListManagerForm : Form
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.Controls.Add(new Label
         {
-            Text = "可以在这里修改下拉框显示名、调整顺序，或删除不需要的仓库项。重命名只影响显示，不会改动原始路径。",
+            Text = "可创建分组并整理仓库。先按 Ctrl 或 Shift 选中普通项，再点击“新建分组”可自动归入新组。",
             AutoSize = true,
-            MaximumSize = new Size(800, 0),
+            MaximumSize = new Size(980, 0),
             Margin = new Padding(0, 0, 0, 12)
         }, 0, 0);
 
@@ -48,277 +57,518 @@ internal sealed class RepositoryListManagerForm : Form
             ColumnCount = 2,
             Margin = new Padding(0)
         };
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55F));
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52F));
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48F));
 
         var leftPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
             Margin = new Padding(0, 0, 12, 0)
         };
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        _summaryLabel = new Label
-        {
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        _summaryLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
         leftPanel.Controls.Add(_summaryLabel, 0, 0);
 
-        _entriesListBox = new ListBox
+        _entriesListBox = new MultiSelectListBox
         {
             Dock = DockStyle.Fill,
             IntegralHeight = false,
             HorizontalScrollbar = true,
+            SelectionMode = SelectionMode.MultiExtended,
+            AllowDrop = true,
             Margin = new Padding(0, 0, 0, 10)
         };
+        _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
         _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
+        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseMove += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Left ||
+                (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
+                 Math.Abs(eventArgs.Y - _dragStartPoint.Y) < SystemInformation.DragSize.Height / 2))
+            {
+                return;
+            }
+
+            var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
+            if (dragIndex >= 0)
+            {
+                BeginDrag(_entriesListBox.Items[dragIndex]);
+            }
+        };        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
+        _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
 
-        var orderButtonsPanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            WrapContents = true,
-            Margin = new Padding(0)
-        };
+        var groupButtonsPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
+        var createGroupButton = CreateDialogButton("新建分组", Color.FromArgb(242, 246, 240));
+        createGroupButton.Click += (_, _) => CreateGroup();
+        groupButtonsPanel.Controls.Add(createGroupButton);
+        leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
+        var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
         var moveUpButton = CreateDialogButton("上移", Color.FromArgb(233, 242, 255));
-        moveUpButton.Margin = new Padding(0, 0, 10, 0);
-        moveUpButton.Click += (_, _) => MoveSelectedEntry(-1);
-        orderButtonsPanel.Controls.Add(moveUpButton);
-
+        moveUpButton.Click += (_, _) => MoveSelectedEntries(-1);
+        operationPanel.Controls.Add(moveUpButton);
         var moveDownButton = CreateDialogButton("下移", Color.FromArgb(233, 242, 255));
-        moveDownButton.Margin = new Padding(0, 0, 10, 0);
-        moveDownButton.Click += (_, _) => MoveSelectedEntry(1);
-        orderButtonsPanel.Controls.Add(moveDownButton);
-
-        var removeButton = CreateDialogButton("删除该项", Color.FromArgb(249, 237, 235));
-        removeButton.Click += (_, _) => RemoveSelectedEntry();
-        orderButtonsPanel.Controls.Add(removeButton);
-
-        leftPanel.Controls.Add(orderButtonsPanel, 0, 2);
+        moveDownButton.Click += (_, _) => MoveSelectedEntries(1);
+        operationPanel.Controls.Add(moveDownButton);
+        var deleteButton = CreateDialogButton("删除选中", Color.FromArgb(249, 237, 235));
+        deleteButton.Click += (_, _) => DeleteSelectedItems();
+        operationPanel.Controls.Add(deleteButton);
+        leftPanel.Controls.Add(operationPanel, 0, 3);
         contentLayout.Controls.Add(leftPanel, 0, 0);
 
         var rightPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 9,
             Margin = new Padding(12, 0, 0, 0)
         };
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var index = 0; index < 8; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rightPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "显示名称",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
-            Margin = new Padding(0, 0, 0, 6)
-        }, 0, 0);
-
-        _displayNameTextBox = new TextBox
-        {
-            Dock = DockStyle.Top,
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        rightPanel.Controls.Add(new Label { Text = "仓库显示名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) }, 0, 0);
+        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_displayNameTextBox, 0, 1);
-
         var applyNameButton = CreateDialogButton("应用名称修改", Color.FromArgb(242, 246, 240));
         applyNameButton.Click += (_, _) => ApplyDisplayNameChanges();
         rightPanel.Controls.Add(applyNameButton, 0, 2);
-
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "实际路径",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
-            Margin = new Padding(0, 14, 0, 6)
-        }, 0, 3);
-
-        _pathTextBox = new TextBox
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            Multiline = true,
-            ScrollBars = ScrollBars.Vertical,
-            BackColor = Color.White,
-            Margin = new Padding(0, 0, 0, 8)
-        };
-        rightPanel.Controls.Add(_pathTextBox, 0, 4);
-
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "显示名称留空时，下拉框会直接显示仓库路径。",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(90, 90, 90),
-            MaximumSize = new Size(420, 0)
-        }, 0, 5);
-
+        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 3);
+        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_groupNameTextBox, 0, 4);
+        var applyGroupButton = CreateDialogButton("应用分组名称", Color.FromArgb(242, 246, 240));
+        applyGroupButton.Click += (_, _) => RenameSelectedGroup();
+        rightPanel.Controls.Add(applyGroupButton, 0, 5);
+        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
+        _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_pathTextBox, 0, 7);
+        rightPanel.Controls.Add(new Label { Text = "组标题不可作为当前仓库选择；双击组标题可展开/收起。拖拽仓库到组或其他仓库可调整归属。", AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90), MaximumSize = new Size(450, 0) }, 0, 8);
         contentLayout.Controls.Add(rightPanel, 1, 0);
         rootLayout.Controls.Add(contentLayout, 0, 1);
 
-        var actionPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = true,
-            Margin = new Padding(0, 12, 0, 0)
-        };
-
+        var actionPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
         var cancelButton = CreateDialogButton("取消", Color.FromArgb(245, 245, 245));
         cancelButton.Click += (_, _) => Close();
         actionPanel.Controls.Add(cancelButton);
-
         var saveButton = CreateDialogButton("保存修改", Color.FromArgb(232, 241, 255));
         saveButton.Margin = new Padding(10, 0, 0, 0);
         saveButton.Click += (_, _) => SaveAndClose();
         actionPanel.Controls.Add(saveButton);
-
         rootLayout.Controls.Add(actionPanel, 0, 2);
         Controls.Add(rootLayout);
 
         RefreshEntriesList(selectedRepoRootPath);
     }
 
-    public List<RepositoryEntry> GetEntries() =>
-        _entries.Select(entry => entry.Clone()).ToList();
+    public List<RepositoryEntry> GetEntries() => _entries.Select(entry => entry.Clone()).ToList();
+    public List<RepositoryGroup> GetGroups() => _groups.Select(group => group.Clone()).ToList();
 
     private static Button CreateDialogButton(string text, Color backgroundColor)
     {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            MinimumSize = new Size(110, 38),
-            Padding = new Padding(12, 6, 12, 6),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = backgroundColor,
-            UseCompatibleTextRendering = true
-        };
-
+        var button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(110, 36), Padding = new Padding(10, 5, 10, 5), FlatStyle = FlatStyle.Flat, BackColor = backgroundColor, UseCompatibleTextRendering = true };
         button.FlatAppearance.BorderColor = Color.FromArgb(190, 202, 215);
         button.FlatAppearance.BorderSize = 1;
         return button;
     }
 
-    private void RefreshEntriesList(string? selectedRepoRootPath)
+    private void RefreshEntriesList(string? selectedRepoRootPath, IEnumerable<string>? selectedGroupIds = null)
     {
+        var selectedPaths = selectedRepoRootPath is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(new[] { GitPathHelper.NormalizePath(selectedRepoRootPath) }, StringComparer.OrdinalIgnoreCase);
+        var selectedGroups = (selectedGroupIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _isRefreshing = true;
         _entriesListBox.BeginUpdate();
         _entriesListBox.Items.Clear();
-
-        foreach (var entry in _entries)
+        var groupedEntries = _entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.GroupId))
+            .GroupBy(entry => entry.GroupId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList(), StringComparer.OrdinalIgnoreCase);
+        var topLevelRows = new List<(int Order, int Kind, RepositoryManagerRow Row)>();
+        foreach (var group in _groups.OrderBy(group => group.DisplayOrder))
         {
-            _entriesListBox.Items.Add(entry);
+            topLevelRows.Add((group.DisplayOrder, 0, new RepositoryManagerRow(group)));
         }
 
-        _entriesListBox.EndUpdate();
-        _summaryLabel.Text = $"共 {_entries.Count} 个仓库项";
-
-        if (_entries.Count == 0)
+        foreach (var entry in _entries
+                     .Where(entry => string.IsNullOrWhiteSpace(entry.GroupId))
+                     .OrderBy(entry => entry.DisplayOrder))
         {
-            _entriesListBox.SelectedIndex = -1;
-            UpdateEditorFromSelection();
-            return;
+            topLevelRows.Add((entry.DisplayOrder, 1, new RepositoryManagerRow(entry, false)));
         }
 
-        var selectedIndex = 0;
-        if (!string.IsNullOrWhiteSpace(selectedRepoRootPath))
+        foreach (var item in topLevelRows.OrderBy(item => item.Order).ThenBy(item => item.Kind))
         {
-            var normalizedPath = GitPathHelper.NormalizePath(selectedRepoRootPath);
-            for (var index = 0; index < _entries.Count; index++)
+            _entriesListBox.Items.Add(item.Row);
+            if (item.Row.Group is not null &&
+                item.Row.Group.IsExpanded &&
+                groupedEntries.TryGetValue(item.Row.Group.Id, out var childEntries))
             {
-                if (string.Equals(_entries[index].RepoRootPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+                foreach (var entry in childEntries)
                 {
-                    selectedIndex = index;
-                    break;
+                    _entriesListBox.Items.Add(new RepositoryManagerRow(entry, true));
                 }
             }
         }
+        _entriesListBox.EndUpdate();
+        _summaryLabel.Text = $"共 {_entries.Count} 个仓库项，{_groups.Count} 个分组";
+        for (var index = 0; index < _entriesListBox.Items.Count; index++)
+        {
+            if (_entriesListBox.Items[index] is not RepositoryManagerRow row) continue;
+            if ((row.Entry is not null && selectedPaths.Contains(row.Entry.RepoRootPath)) || (row.Group is not null && selectedGroups.Contains(row.Group.Id))) _entriesListBox.SetSelected(index, true);
+        }
+        if (_entriesListBox.SelectedIndices.Count == 0 && _entriesListBox.Items.Count > 0 && selectedRepoRootPath is null) _entriesListBox.SetSelected(0, true);
+        _isRefreshing = false;
+        UpdateEditorFromSelection();
+    }
 
-        _entriesListBox.SelectedIndex = selectedIndex;
+    private void BeginDrag(object? item)
+    {
+        if (item is not RepositoryManagerRow row)
+        {
+            return;
+        }
+
+        if (!_entriesListBox.SelectedItems.Contains(row))
+        {
+            _entriesListBox.ClearSelected();
+            var index = _entriesListBox.Items.IndexOf(row);
+            if (index >= 0)
+            {
+                _entriesListBox.SetSelected(index, true);
+            }
+        }
+
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        if (rows.Count > 0)
+        {
+            _entriesListBox.DoDragDrop(new RepositoryDragPayload(rows), DragDropEffects.Move);
+        }
+    }
+
+    private void UpdateDragEffect(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(RepositoryDragPayload)) is not RepositoryDragPayload payload)
+        {
+            eventArgs.Effect = DragDropEffects.None;
+            return;
+        }
+
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as RepositoryManagerRow : null;
+        eventArgs.Effect = payload.Groups.Count > 0
+            ? targetRow?.Group is not null && !payload.Groups.Contains(targetRow.Group)
+                ? DragDropEffects.Move
+                : DragDropEffects.None
+            : payload.Entries.Count > 0
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+    }
+
+    private void CompleteDrag(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(RepositoryDragPayload)) is not RepositoryDragPayload payload) return;
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as RepositoryManagerRow : null;
+        if (payload.Groups.Count > 0)
+        {
+            if (targetRow?.Group is not null) MoveGroupsByDrag(payload.Groups, targetRow.Group);
+            return;
+        }
+        if (payload.Entries.Count == 0) return;
+        var targetGroupId = targetRow?.Group?.Id ?? targetRow?.Entry?.GroupId;
+        foreach (var entry in payload.Entries) entry.GroupId = targetGroupId;
+        NormalizeOrders();
+        RefreshEntriesList(payload.Entries.FirstOrDefault()?.RepoRootPath);
+    }
+    private void MoveGroupsByDrag(IReadOnlyList<RepositoryGroup> selectedGroups, RepositoryGroup targetGroup)
+    {
+        if (selectedGroups.Contains(targetGroup))
+        {
+            return;
+        }
+
+        var movingGroups = _groups.Where(selectedGroups.Contains).ToList();
+        if (movingGroups.Count == 0)
+        {
+            return;
+        }
+
+        _groups.RemoveAll(selectedGroups.Contains);
+        var targetIndex = _groups.IndexOf(targetGroup);
+        if (targetIndex < 0)
+        {
+            return;
+        }
+
+        _groups.InsertRange(targetIndex, movingGroups);
+        NormalizeOrders();
+        RefreshEntriesList(null, movingGroups.Select(group => group.Id));
+    }
+    private void EnforceSelectionType()
+    {
+        if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        var hasGroup = rows.Any(row => row.Group is not null);
+        var hasEntry = rows.Any(row => row.Entry is not null);
+        if (!hasGroup || !hasEntry) return;
+        _isUpdatingSelection = true;
+        try
+        {
+            var keepIndex = _entriesListBox.SelectedIndices.Cast<int>().Last();
+            _entriesListBox.ClearSelected();
+            _entriesListBox.SetSelected(keepIndex, true);
+        }
+        finally { _isUpdatingSelection = false; }
     }
 
     private void UpdateEditorFromSelection()
     {
-        if (_entriesListBox.SelectedItem is not RepositoryEntry entry)
-        {
-            _displayNameTextBox.Text = string.Empty;
-            _pathTextBox.Text = string.Empty;
-            return;
-        }
-
-        _displayNameTextBox.Text = entry.DisplayName;
-        _pathTextBox.Text = entry.RepoRootPath;
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        var entry = rows.Count == 1 ? rows[0].Entry : null;
+        var group = rows.Count == 1 ? rows[0].Group : null;
+        _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
+        _pathTextBox.Text = entry?.RepoRootPath ?? string.Empty;
+        _groupNameTextBox.Text = group?.Name ?? string.Empty;
     }
 
     private void ApplyDisplayNameChanges()
     {
-        if (_entriesListBox.SelectedItem is not RepositoryEntry entry)
-        {
-            return;
-        }
-
-        var updatedName = _displayNameTextBox.Text.Trim();
-        entry.DisplayName = updatedName;
-        var selectedPath = entry.RepoRootPath;
-        RefreshEntriesList(selectedPath);
+        var row = GetSingleSelectedRow();
+        if (row?.Entry is null) return;
+        row.Entry.DisplayName = _displayNameTextBox.Text.Trim();
+        RefreshEntriesList(row.Entry.RepoRootPath);
     }
-    private void MoveSelectedEntry(int offset)
+
+    private void CreateGroup()
     {
-        if (_entriesListBox.SelectedItem is not RepositoryEntry entry)
-        {
-            return;
-        }
-
-        var currentIndex = _entries.IndexOf(entry);
-        var targetIndex = currentIndex + offset;
-        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _entries.Count)
-        {
-            return;
-        }
-
-        _entries.RemoveAt(currentIndex);
-        _entries.Insert(targetIndex, entry);
-        RefreshEntriesList(entry.RepoRootPath);
+        var baseName = "新分组";
+        var name = baseName;
+        var suffix = 2;
+        while (_groups.Any(group => string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase))) name = $"{baseName} ({suffix++})";
+        var selectedEntries = GetSelectedEntries();
+        var newGroup = new RepositoryGroup { Name = name, DisplayOrder = _groups.Count, IsExpanded = true };
+        _groups.Add(newGroup);
+        foreach (var entry in selectedEntries) entry.GroupId = newGroup.Id;
+        RefreshEntriesList(selectedEntries.FirstOrDefault()?.RepoRootPath, new[] { newGroup.Id });
     }
-
-    private void RemoveSelectedEntry()
+    private void RenameSelectedGroup()
     {
-        if (_entriesListBox.SelectedItem is not RepositoryEntry entry)
+        var row = GetSingleSelectedRow();
+        if (row?.Group is null) return;
+        var name = _groupNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (_groups.Any(group => !ReferenceEquals(group, row.Group) && string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
+            MessageBox.Show(this, "分组名称不能重复。", "无法重命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-
-        var removeIndex = _entries.IndexOf(entry);
-        if (removeIndex < 0)
-        {
-            return;
-        }
-
-        _entries.RemoveAt(removeIndex);
-        var nextSelectedPath = removeIndex < _entries.Count
-            ? _entries[removeIndex].RepoRootPath
-            : _entries.LastOrDefault()?.RepoRootPath;
-        RefreshEntriesList(nextSelectedPath);
+        row.Group.Name = name;
+        RefreshEntriesList(null, new[] { row.Group.Id });
     }
+
+    private void ToggleSelectedGroup()
+    {
+        var row = GetSingleSelectedRow();
+        if (row?.Group is null) return;
+        row.Group.IsExpanded = !row.Group.IsExpanded;
+        RefreshEntriesList(null, new[] { row.Group.Id });
+    }
+
+    private void MoveSelectedEntries(int offset)
+    {
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        var selectedGroups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        if (selectedGroups.Count > 0)
+        {
+            var groupIndexes = selectedGroups.Select(group => _groups.IndexOf(group)).OrderBy(index => index).ToList();
+            if (offset < 0)
+            {
+                if (groupIndexes[0] == 0) return;
+                foreach (var index in groupIndexes) (_groups[index - 1], _groups[index]) = (_groups[index], _groups[index - 1]);
+            }
+            else
+            {
+                if (groupIndexes[^1] >= _groups.Count - 1) return;
+                for (var index = groupIndexes.Count - 1; index >= 0; index--) { var groupIndex = groupIndexes[index]; (_groups[groupIndex + 1], _groups[groupIndex]) = (_groups[groupIndex], _groups[groupIndex + 1]); }
+            }
+            NormalizeOrders();
+            RefreshEntriesList(null, selectedGroups.Select(group => group.Id));
+            return;
+        }
+
+        var selected = GetSelectedEntries();
+        if (selected.Count == 0) return;
+
+        foreach (var group in selected.GroupBy(entry => entry.GroupId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            var groupEntries = _entries
+                .Where(entry => string.Equals(entry.GroupId ?? string.Empty, group.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList();
+            var selectedSet = group.ToHashSet();
+            var indexes = groupEntries
+                .Select((entry, index) => (entry, index))
+                .Where(item => selectedSet.Contains(item.entry))
+                .Select(item => item.index)
+                .OrderBy(index => index)
+                .ToList();
+            if (indexes.Count == 0) continue;
+
+            if (offset < 0)
+            {
+                if (indexes[0] == 0) continue;
+                foreach (var index in indexes)
+                {
+                    (groupEntries[index - 1].DisplayOrder, groupEntries[index].DisplayOrder) =
+                        (groupEntries[index].DisplayOrder, groupEntries[index - 1].DisplayOrder);
+                }
+            }
+            else
+            {
+                if (indexes[^1] >= groupEntries.Count - 1) continue;
+                for (var index = indexes.Count - 1; index >= 0; index--)
+                {
+                    var entryIndex = indexes[index];
+                    (groupEntries[entryIndex + 1].DisplayOrder, groupEntries[entryIndex].DisplayOrder) =
+                        (groupEntries[entryIndex].DisplayOrder, groupEntries[entryIndex + 1].DisplayOrder);
+                }
+            }
+        }
+
+        RefreshEntriesList(selected.FirstOrDefault()?.RepoRootPath);
+    }
+    private void DeleteSelectedItems()
+    {
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        if (rows.Count == 0) return;
+        var groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        var entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+        if (groups.Count > 0)
+        {
+            var message = groups.Count == 1 ? "删除分组将同时删除组内所有仓库项，确定继续吗？" : $"删除 {groups.Count} 个分组将同时删除组内所有仓库项，确定继续吗？";
+            if (MessageBox.Show(this, message, "确认删除分组", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            foreach (var group in groups) { _groups.Remove(group); _entries.RemoveAll(entry => string.Equals(entry.GroupId, group.Id, StringComparison.OrdinalIgnoreCase)); }
+            NormalizeOrders();
+            RefreshEntriesList(null);
+            return;
+        }
+        if (MessageBox.Show(this, $"确定删除选中的 {entries.Count} 个仓库项吗？", "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        foreach (var entry in entries) _entries.Remove(entry);
+        NormalizeOrders();
+        RefreshEntriesList(null);
+    }
+
+    private void NormalizeOrders()
+    {
+        for (var index = 0; index < _groups.Count; index++) _groups[index].DisplayOrder = index;
+        var ordered = _entries.OrderBy(entry => entry.DisplayOrder).ToList();
+        _entries.Clear();
+        _entries.AddRange(ordered);
+        for (var index = 0; index < _entries.Count; index++) _entries[index].DisplayOrder = index;
+    }
+
+    private RepositoryManagerRow? GetSingleSelectedRow() => _entriesListBox.SelectedItems.Count == 1 ? _entriesListBox.SelectedItem as RepositoryManagerRow : null;
+    private List<RepositoryEntry> GetSelectedEntries() => _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
 
     private void SaveAndClose()
     {
         ApplyDisplayNameChanges();
-        SelectedRepoRootPath = _entriesListBox.SelectedItem is RepositoryEntry entry
-            ? entry.RepoRootPath
-            : _entries.FirstOrDefault()?.RepoRootPath;
-
+        NormalizeOrders();
+        SelectedRepoRootPath = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().Select(row => row.Entry?.RepoRootPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.RepoRootPath;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private sealed class MultiSelectListBox : ListBox
+    {
+        private const int WmLButtonDown = 0x0201;
+        private const int WmLButtonUp = 0x0202;
+        private List<object>? _preservedSelectedItems;
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmLButtonDown && ModifierKeys == Keys.None)
+            {
+                var index = IndexFromPoint(PointToClient(Cursor.Position));
+                _preservedSelectedItems = index >= 0 &&
+                                            SelectedIndices.Count > 1 &&
+                                            SelectedIndices.Contains(index)
+                    ? SelectedItems.Cast<object>().ToList()
+                    : null;
+
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                return;
+            }
+
+            if (message.Msg == WmLButtonUp && _preservedSelectedItems is not null)
+            {
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                _preservedSelectedItems = null;
+                return;
+            }
+
+            base.WndProc(ref message);
+        }
+
+        private void RestorePreservedSelection()
+        {
+            if (_preservedSelectedItems is null)
+            {
+                return;
+            }
+
+            ClearSelected();
+            foreach (var selectedItem in _preservedSelectedItems)
+            {
+                var selectedIndex = Items.IndexOf(selectedItem);
+                if (selectedIndex >= 0)
+                {
+                    SetSelected(selectedIndex, true);
+                }
+            }
+        }
+    }    private sealed class RepositoryDragPayload
+    {
+        public RepositoryDragPayload(IReadOnlyList<RepositoryManagerRow> rows)
+        {
+            Rows = rows;
+            Entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+            Groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        }
+
+        public IReadOnlyList<RepositoryManagerRow> Rows { get; }
+        public IReadOnlyList<RepositoryEntry> Entries { get; }
+        public IReadOnlyList<RepositoryGroup> Groups { get; }
+    }
+    private sealed class RepositoryManagerRow
+    {
+        public RepositoryGroup? Group { get; }
+        public RepositoryEntry? Entry { get; }
+        private readonly bool _indented;
+        public RepositoryManagerRow(RepositoryGroup group) => Group = group;
+        public RepositoryManagerRow(RepositoryEntry entry, bool indented) { Entry = entry; _indented = indented; }
+        public override string ToString() => Group is not null ? $"{(Group.IsExpanded ? "▼" : "▶")} {Group.Name}" : (_indented ? $"    {Entry!.DisplayLabel}" : Entry!.DisplayLabel);
+    }
+
+    private sealed class GroupChoice(string? id, string name)
+    {
+        public string? Id { get; } = id;
+        public override string ToString() => name;
     }
 }

@@ -6,353 +6,512 @@ namespace TortoiseGitLauncher;
 internal sealed class ExecutionDirectoryManagerForm : Form
 {
     private readonly List<ExecutionDirectoryEntry> _entries;
+    private readonly List<ExecutionDirectoryGroup> _groups;
     private readonly ListBox _entriesListBox;
     private readonly TextBox _displayNameTextBox;
+    private readonly TextBox _groupNameTextBox;
     private readonly TextBox _pathTextBox;
     private readonly Label _pathStatusLabel;
     private readonly Label _summaryLabel;
+    private bool _isRefreshing;
+    private bool _isUpdatingSelection;
+    private Point _dragStartPoint;
 
     public string? SelectedDirectoryPath { get; private set; }
 
     public ExecutionDirectoryManagerForm(
         IEnumerable<ExecutionDirectoryEntry> entries,
+        IEnumerable<ExecutionDirectoryGroup> groups,
         string? selectedDirectoryPath)
     {
         _entries = entries.Select(entry => entry.Clone()).ToList();
+        _groups = groups.Select(group => group.Clone()).ToList();
         SelectedDirectoryPath = selectedDirectoryPath;
 
         Text = "管理执行目录";
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(760, 520);
-        Size = new Size(860, 580);
+        MinimumSize = new Size(900, 600);
+        Size = new Size(1040, 700);
         Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
 
-        var rootLayout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(16)
-        };
+        var rootLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(16) };
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.Controls.Add(new Label
         {
-            Text = "修改下拉框显示名、调整顺序，或删除不再使用的执行目录。显示名称不会改变实际路径。",
+            Text = "可创建分组并整理执行目录。先按 Ctrl 或 Shift 选中普通项，再点击“新建分组”可自动归入新组。",
             AutoSize = true,
-            MaximumSize = new Size(800, 0),
+            MaximumSize = new Size(980, 0),
             Margin = new Padding(0, 0, 0, 12)
         }, 0, 0);
 
-        var contentLayout = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            Margin = new Padding(0)
-        };
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
-        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55F));
+        var contentLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = new Padding(0) };
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52F));
+        contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48F));
 
-        var leftPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Margin = new Padding(0, 0, 12, 0)
-        };
+        var leftPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Margin = new Padding(0, 0, 12, 0) };
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-        _summaryLabel = new Label
-        {
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        leftPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _summaryLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
         leftPanel.Controls.Add(_summaryLabel, 0, 0);
 
-        _entriesListBox = new ListBox
+        _entriesListBox = new MultiSelectListBox
         {
             Dock = DockStyle.Fill,
             IntegralHeight = false,
             HorizontalScrollbar = true,
-            FormattingEnabled = true,
+            SelectionMode = SelectionMode.MultiExtended,
             Margin = new Padding(0, 0, 0, 10)
         };
-        _entriesListBox.Format += (_, eventArgs) =>
-        {
-            if (eventArgs.ListItem is ExecutionDirectoryEntry entry)
-            {
-                eventArgs.Value = Directory.Exists(entry.DirectoryPath)
-                    ? entry.DisplayLabel
-                    : $"{entry.DisplayLabel}（不可用）";
-            }
-        };
+        _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
         _entriesListBox.SelectedIndexChanged += (_, _) => UpdateEditorFromSelection();
+        _entriesListBox.MouseDown += (_, eventArgs) => _dragStartPoint = eventArgs.Location;
+        _entriesListBox.MouseMove += (_, eventArgs) =>
+        {
+            if (eventArgs.Button != MouseButtons.Left ||
+                (Math.Abs(eventArgs.X - _dragStartPoint.X) < SystemInformation.DragSize.Width / 2 &&
+                 Math.Abs(eventArgs.Y - _dragStartPoint.Y) < SystemInformation.DragSize.Height / 2))
+            {
+                return;
+            }
+
+            var dragIndex = _entriesListBox.IndexFromPoint(eventArgs.Location);
+            if (dragIndex >= 0)
+            {
+                BeginDrag(_entriesListBox.Items[dragIndex]);
+            }
+        };        _entriesListBox.DragEnter += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragOver += (_, eventArgs) => UpdateDragEffect(eventArgs);
+        _entriesListBox.DragDrop += (_, eventArgs) => CompleteDrag(eventArgs);
+        _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
 
-        var orderButtonsPanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            WrapContents = true,
-            Margin = new Padding(0)
-        };
+        var groupButtonsPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
+        var createGroupButton = CreateDialogButton("新建分组", Color.FromArgb(242, 246, 240));
+        createGroupButton.Click += (_, _) => CreateGroup();
+        groupButtonsPanel.Controls.Add(createGroupButton);
+        leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
+        var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
         var moveUpButton = CreateDialogButton("上移", Color.FromArgb(233, 242, 255));
-        moveUpButton.Margin = new Padding(0, 0, 10, 0);
-        moveUpButton.Click += (_, _) => MoveSelectedEntry(-1);
-        orderButtonsPanel.Controls.Add(moveUpButton);
-
+        moveUpButton.Click += (_, _) => MoveSelectedItems(-1);
+        operationPanel.Controls.Add(moveUpButton);
         var moveDownButton = CreateDialogButton("下移", Color.FromArgb(233, 242, 255));
-        moveDownButton.Margin = new Padding(0, 0, 10, 0);
-        moveDownButton.Click += (_, _) => MoveSelectedEntry(1);
-        orderButtonsPanel.Controls.Add(moveDownButton);
-
-        var removeButton = CreateDialogButton("删除该项", Color.FromArgb(249, 237, 235));
-        removeButton.Click += (_, _) => RemoveSelectedEntry();
-        orderButtonsPanel.Controls.Add(removeButton);
-
-        leftPanel.Controls.Add(orderButtonsPanel, 0, 2);
+        moveDownButton.Click += (_, _) => MoveSelectedItems(1);
+        operationPanel.Controls.Add(moveDownButton);
+        var deleteButton = CreateDialogButton("删除选中", Color.FromArgb(249, 237, 235));
+        deleteButton.Click += (_, _) => DeleteSelectedItems();
+        operationPanel.Controls.Add(deleteButton);
+        leftPanel.Controls.Add(operationPanel, 0, 3);
         contentLayout.Controls.Add(leftPanel, 0, 0);
 
-        var rightPanel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 7,
-            Margin = new Padding(12, 0, 0, 0)
-        };
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var rightPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = new Padding(12, 0, 0, 0) };
+        for (var index = 0; index < 8; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rightPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "显示名称",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
-            Margin = new Padding(0, 0, 0, 6)
-        }, 0, 0);
-
-        _displayNameTextBox = new TextBox
-        {
-            Dock = DockStyle.Top,
-            Margin = new Padding(0, 0, 0, 8)
-        };
+        rightPanel.Controls.Add(new Label { Text = "目录显示名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) }, 0, 0);
+        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_displayNameTextBox, 0, 1);
-
         var applyNameButton = CreateDialogButton("应用名称修改", Color.FromArgb(242, 246, 240));
         applyNameButton.Click += (_, _) => ApplyDisplayNameChanges();
         rightPanel.Controls.Add(applyNameButton, 0, 2);
-
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "实际路径",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point),
-            Margin = new Padding(0, 14, 0, 6)
-        }, 0, 3);
-
-        _pathTextBox = new TextBox
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            Multiline = true,
-            ScrollBars = ScrollBars.Vertical,
-            BackColor = Color.White,
-            Margin = new Padding(0, 0, 0, 8)
-        };
-        rightPanel.Controls.Add(_pathTextBox, 0, 4);
-
-        _pathStatusLabel = new Label
-        {
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 8)
-        };
-        rightPanel.Controls.Add(_pathStatusLabel, 0, 5);
-
-        rightPanel.Controls.Add(new Label
-        {
-            Text = "显示名称留空时，下拉框直接显示实际路径。路径失效后配置仍会保留。",
-            AutoSize = true,
-            ForeColor = Color.FromArgb(90, 90, 90),
-            MaximumSize = new Size(420, 0)
-        }, 0, 6);
-
+        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 3);
+        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_groupNameTextBox, 0, 4);
+        var applyGroupButton = CreateDialogButton("应用分组名称", Color.FromArgb(242, 246, 240));
+        applyGroupButton.Click += (_, _) => RenameSelectedGroup();
+        rightPanel.Controls.Add(applyGroupButton, 0, 5);
+        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
+        _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_pathTextBox, 0, 7);
+        _pathStatusLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_pathStatusLabel, 0, 8);
         contentLayout.Controls.Add(rightPanel, 1, 0);
         rootLayout.Controls.Add(contentLayout, 0, 1);
 
-        var actionPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft,
-            AutoSize = true,
-            Margin = new Padding(0, 12, 0, 0)
-        };
-
+        var actionPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
         var cancelButton = CreateDialogButton("取消", Color.FromArgb(245, 245, 245));
         cancelButton.DialogResult = DialogResult.Cancel;
         actionPanel.Controls.Add(cancelButton);
-
         var saveButton = CreateDialogButton("保存修改", Color.FromArgb(232, 241, 255));
         saveButton.Margin = new Padding(10, 0, 0, 0);
         saveButton.Click += (_, _) => SaveAndClose();
         actionPanel.Controls.Add(saveButton);
-
         rootLayout.Controls.Add(actionPanel, 0, 2);
         Controls.Add(rootLayout);
         CancelButton = cancelButton;
-
         RefreshEntriesList(selectedDirectoryPath);
     }
 
-    public List<ExecutionDirectoryEntry> GetEntries() =>
-        _entries.Select(entry => entry.Clone()).ToList();
+    public List<ExecutionDirectoryEntry> GetEntries() => _entries.Select(entry => entry.Clone()).ToList();
+    public List<ExecutionDirectoryGroup> GetGroups() => _groups.Select(group => group.Clone()).ToList();
 
     private static Button CreateDialogButton(string text, Color backgroundColor)
     {
-        var button = new Button
-        {
-            Text = text,
-            AutoSize = true,
-            MinimumSize = new Size(110, 38),
-            Padding = new Padding(12, 6, 12, 6),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = backgroundColor,
-            UseCompatibleTextRendering = true
-        };
-
+        var button = new Button { Text = text, AutoSize = true, MinimumSize = new Size(110, 36), Padding = new Padding(10, 5, 10, 5), FlatStyle = FlatStyle.Flat, BackColor = backgroundColor, UseCompatibleTextRendering = true };
         button.FlatAppearance.BorderColor = Color.FromArgb(190, 202, 215);
         button.FlatAppearance.BorderSize = 1;
         return button;
     }
 
-    private void RefreshEntriesList(string? selectedDirectoryPath)
+    private void RefreshEntriesList(string? selectedDirectoryPath, IEnumerable<string>? selectedGroupIds = null)
     {
+        var selectedPaths = selectedDirectoryPath is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(new[] { ScriptRunnerPathHelper.NormalizeDirectoryPath(selectedDirectoryPath) }, StringComparer.OrdinalIgnoreCase);
+        var selectedGroups = (selectedGroupIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _isRefreshing = true;
         _entriesListBox.BeginUpdate();
         _entriesListBox.Items.Clear();
-        foreach (var entry in _entries)
+        var groupedEntries = _entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.GroupId))
+            .GroupBy(entry => entry.GroupId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList(), StringComparer.OrdinalIgnoreCase);
+        var topLevelRows = new List<(int Order, int Kind, ManagerRow Row)>();
+        foreach (var group in _groups.OrderBy(group => group.DisplayOrder))
         {
-            _entriesListBox.Items.Add(entry);
+            topLevelRows.Add((group.DisplayOrder, 0, new ManagerRow(group)));
+        }
+
+        foreach (var entry in _entries
+                     .Where(entry => string.IsNullOrWhiteSpace(entry.GroupId))
+                     .OrderBy(entry => entry.DisplayOrder))
+        {
+            topLevelRows.Add((entry.DisplayOrder, 1, new ManagerRow(entry, false)));
+        }
+
+        foreach (var item in topLevelRows.OrderBy(item => item.Order).ThenBy(item => item.Kind))
+        {
+            _entriesListBox.Items.Add(item.Row);
+            if (item.Row.Group is not null &&
+                item.Row.Group.IsExpanded &&
+                groupedEntries.TryGetValue(item.Row.Group.Id, out var childEntries))
+            {
+                foreach (var entry in childEntries)
+                {
+                    _entriesListBox.Items.Add(new ManagerRow(entry, true));
+                }
+            }
         }
         _entriesListBox.EndUpdate();
-
-        _summaryLabel.Text = $"共 {_entries.Count} 个执行目录";
-        if (_entries.Count == 0)
+        _summaryLabel.Text = $"共 {_entries.Count} 个执行目录，{_groups.Count} 个分组";
+        for (var index = 0; index < _entriesListBox.Items.Count; index++)
         {
-            _entriesListBox.SelectedIndex = -1;
-            UpdateEditorFromSelection();
+            if (_entriesListBox.Items[index] is not ManagerRow row) continue;
+            if ((row.Entry is not null && selectedPaths.Contains(row.Entry.DirectoryPath)) || (row.Group is not null && selectedGroups.Contains(row.Group.Id))) _entriesListBox.SetSelected(index, true);
+        }
+        if (_entriesListBox.SelectedIndices.Count == 0 && _entriesListBox.Items.Count > 0 && selectedDirectoryPath is null) _entriesListBox.SetSelected(0, true);
+        _isRefreshing = false;
+        UpdateEditorFromSelection();
+    }
+
+    private void BeginDrag(object? item)
+    {
+        if (item is not ManagerRow row) return;
+        if (!_entriesListBox.SelectedItems.Contains(row))
+        {
+            _entriesListBox.ClearSelected();
+            var index = _entriesListBox.Items.IndexOf(row);
+            if (index >= 0) _entriesListBox.SetSelected(index, true);
+        }
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        if (rows.Count > 0) _entriesListBox.DoDragDrop(new DirectoryDragPayload(rows), DragDropEffects.Move);
+    }
+
+    private void UpdateDragEffect(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(DirectoryDragPayload)) is not DirectoryDragPayload payload)
+        {
+            eventArgs.Effect = DragDropEffects.None;
             return;
         }
 
-        var selectedIndex = 0;
-        if (!string.IsNullOrWhiteSpace(selectedDirectoryPath))
-        {
-            try
-            {
-                var normalizedPath = ScriptRunnerPathHelper.NormalizeDirectoryPath(selectedDirectoryPath);
-                for (var index = 0; index < _entries.Count; index++)
-                {
-                    if (string.Equals(
-                            _entries[index].DirectoryPath,
-                            normalizedPath,
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        selectedIndex = index;
-                        break;
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as ManagerRow : null;
+        eventArgs.Effect = payload.Groups.Count > 0
+            ? targetRow?.Group is not null && !payload.Groups.Contains(targetRow.Group)
+                ? DragDropEffects.Move
+                : DragDropEffects.None
+            : payload.Entries.Count > 0
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+    }
 
-        _entriesListBox.SelectedIndex = selectedIndex;
+    private void CompleteDrag(DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetData(typeof(DirectoryDragPayload)) is not DirectoryDragPayload payload) return;
+        var point = _entriesListBox.PointToClient(new Point(eventArgs.X, eventArgs.Y));
+        var index = _entriesListBox.IndexFromPoint(point);
+        var targetRow = index >= 0 ? _entriesListBox.Items[index] as ManagerRow : null;
+        if (payload.Groups.Count > 0)
+        {
+            if (targetRow?.Group is not null) MoveGroupsByDrag(payload.Groups, targetRow.Group);
+            return;
+        }
+        if (payload.Entries.Count == 0) return;
+        var targetGroupId = targetRow?.Group?.Id ?? targetRow?.Entry?.GroupId;
+        foreach (var entry in payload.Entries) entry.GroupId = targetGroupId;
+        NormalizeOrders();
+        RefreshEntriesList(payload.Entries.FirstOrDefault()?.DirectoryPath);
+    }
+    private void MoveGroupsByDrag(IReadOnlyList<ExecutionDirectoryGroup> selectedGroups, ExecutionDirectoryGroup targetGroup)
+    {
+        if (selectedGroups.Contains(targetGroup)) return;
+        var movingGroups = _groups.Where(selectedGroups.Contains).ToList();
+        if (movingGroups.Count == 0) return;
+        _groups.RemoveAll(selectedGroups.Contains);
+        var targetIndex = _groups.IndexOf(targetGroup);
+        if (targetIndex < 0) return;
+        _groups.InsertRange(targetIndex, movingGroups);
+        NormalizeOrders();
+        RefreshEntriesList(null, movingGroups.Select(group => group.Id));
+    }
+    private void EnforceSelectionType()
+    {
+        if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        if (!rows.Any(row => row.Group is not null) || !rows.Any(row => row.Entry is not null)) return;
+        _isUpdatingSelection = true;
+        try
+        {
+            var keepIndex = _entriesListBox.SelectedIndices.Cast<int>().Last();
+            _entriesListBox.ClearSelected();
+            _entriesListBox.SetSelected(keepIndex, true);
+        }
+        finally { _isUpdatingSelection = false; }
     }
 
     private void UpdateEditorFromSelection()
     {
-        if (_entriesListBox.SelectedItem is not ExecutionDirectoryEntry entry)
-        {
-            _displayNameTextBox.Text = string.Empty;
-            _pathTextBox.Text = string.Empty;
-            _pathStatusLabel.Text = string.Empty;
-            return;
-        }
-
-        _displayNameTextBox.Text = entry.DisplayName;
-        _pathTextBox.Text = entry.DirectoryPath;
-        var isAvailable = Directory.Exists(entry.DirectoryPath);
-        _pathStatusLabel.Text = isAvailable ? "目录可用" : "目录不存在或暂时不可访问";
-        _pathStatusLabel.ForeColor = isAvailable
-            ? Color.FromArgb(23, 112, 41)
-            : Color.FromArgb(180, 45, 30);
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        var entry = rows.Count == 1 ? rows[0].Entry : null;
+        var group = rows.Count == 1 ? rows[0].Group : null;
+        _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
+        _pathTextBox.Text = entry?.DirectoryPath ?? string.Empty;
+        _groupNameTextBox.Text = group?.Name ?? string.Empty;
+        if (entry is null) { _pathStatusLabel.Text = string.Empty; return; }
+        var available = Directory.Exists(entry.DirectoryPath);
+        _pathStatusLabel.Text = available ? "目录可用" : "目录不存在或暂时不可访问";
+        _pathStatusLabel.ForeColor = available ? Color.FromArgb(23, 112, 41) : Color.FromArgb(180, 45, 30);
     }
 
     private void ApplyDisplayNameChanges()
     {
-        if (_entriesListBox.SelectedItem is not ExecutionDirectoryEntry entry)
-        {
-            return;
-        }
-
-        entry.DisplayName = _displayNameTextBox.Text.Trim();
-        RefreshEntriesList(entry.DirectoryPath);
+        var row = GetSingleSelectedRow();
+        if (row?.Entry is null) return;
+        row.Entry.DisplayName = _displayNameTextBox.Text.Trim();
+        RefreshEntriesList(row.Entry.DirectoryPath);
     }
 
-    private void MoveSelectedEntry(int offset)
+    private void CreateGroup()
     {
-        if (_entriesListBox.SelectedItem is not ExecutionDirectoryEntry entry)
-        {
-            return;
-        }
-
-        var currentIndex = _entries.IndexOf(entry);
-        var targetIndex = currentIndex + offset;
-        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= _entries.Count)
-        {
-            return;
-        }
-
-        _entries.RemoveAt(currentIndex);
-        _entries.Insert(targetIndex, entry);
-        RefreshEntriesList(entry.DirectoryPath);
+        var baseName = "新分组";
+        var name = baseName;
+        var suffix = 2;
+        while (_groups.Any(group => string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase))) name = $"{baseName} ({suffix++})";
+        var selectedEntries = GetSelectedEntries();
+        var newGroup = new ExecutionDirectoryGroup { Name = name, DisplayOrder = _groups.Count, IsExpanded = true };
+        _groups.Add(newGroup);
+        foreach (var entry in selectedEntries) entry.GroupId = newGroup.Id;
+        RefreshEntriesList(selectedEntries.FirstOrDefault()?.DirectoryPath, new[] { newGroup.Id });
     }
-
-    private void RemoveSelectedEntry()
+    private void RenameSelectedGroup()
     {
-        if (_entriesListBox.SelectedItem is not ExecutionDirectoryEntry entry)
+        var row = GetSingleSelectedRow();
+        if (row?.Group is null) return;
+        var name = _groupNameTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (_groups.Any(group => !ReferenceEquals(group, row.Group) && string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
+            MessageBox.Show(this, "分组名称不能重复。", "无法重命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-
-        var removeIndex = _entries.IndexOf(entry);
-        if (removeIndex < 0)
-        {
-            return;
-        }
-
-        _entries.RemoveAt(removeIndex);
-        var nextSelectedPath = removeIndex < _entries.Count
-            ? _entries[removeIndex].DirectoryPath
-            : _entries.LastOrDefault()?.DirectoryPath;
-        RefreshEntriesList(nextSelectedPath);
+        row.Group.Name = name;
+        RefreshEntriesList(null, new[] { row.Group.Id });
     }
+
+    private void ToggleSelectedGroup()
+    {
+        var row = GetSingleSelectedRow();
+        if (row?.Group is null) return;
+        row.Group.IsExpanded = !row.Group.IsExpanded;
+        RefreshEntriesList(null, new[] { row.Group.Id });
+    }
+
+    private void MoveSelectedItems(int offset)
+    {
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        var groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        if (groups.Count > 0)
+        {
+            var indexes = groups.Select(group => _groups.IndexOf(group)).OrderBy(index => index).ToList();
+            if (offset < 0) { if (indexes[0] == 0) return; foreach (var index in indexes) (_groups[index - 1], _groups[index]) = (_groups[index], _groups[index - 1]); }
+            else { if (indexes[^1] >= _groups.Count - 1) return; for (var index = indexes.Count - 1; index >= 0; index--) { var groupIndex = indexes[index]; (_groups[groupIndex + 1], _groups[groupIndex]) = (_groups[groupIndex], _groups[groupIndex + 1]); } }
+            NormalizeOrders();
+            RefreshEntriesList(null, groups.Select(group => group.Id));
+            return;
+        }
+        var entries = GetSelectedEntries();
+        if (entries.Count == 0) return;
+
+        foreach (var group in entries.GroupBy(entry => entry.GroupId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            var groupEntries = _entries
+                .Where(entry => string.Equals(entry.GroupId ?? string.Empty, group.Key, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(entry => entry.DisplayOrder)
+                .ToList();
+            var selectedSet = group.ToHashSet();
+            var indexes = groupEntries
+                .Select((entry, index) => (entry, index))
+                .Where(item => selectedSet.Contains(item.entry))
+                .Select(item => item.index)
+                .OrderBy(index => index)
+                .ToList();
+            if (indexes.Count == 0) continue;
+
+            if (offset < 0)
+            {
+                if (indexes[0] == 0) continue;
+                foreach (var index in indexes)
+                {
+                    (groupEntries[index - 1].DisplayOrder, groupEntries[index].DisplayOrder) =
+                        (groupEntries[index].DisplayOrder, groupEntries[index - 1].DisplayOrder);
+                }
+            }
+            else
+            {
+                if (indexes[^1] >= groupEntries.Count - 1) continue;
+                for (var index = indexes.Count - 1; index >= 0; index--)
+                {
+                    var entryIndex = indexes[index];
+                    (groupEntries[entryIndex + 1].DisplayOrder, groupEntries[entryIndex].DisplayOrder) =
+                        (groupEntries[entryIndex].DisplayOrder, groupEntries[entryIndex + 1].DisplayOrder);
+                }
+            }
+        }
+
+        RefreshEntriesList(entries.FirstOrDefault()?.DirectoryPath);
+    }
+    private void DeleteSelectedItems()
+    {
+        var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
+        if (rows.Count == 0) return;
+        var groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        var entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+        if (groups.Count > 0)
+        {
+            var message = groups.Count == 1 ? "删除分组将同时删除组内所有执行目录，确定继续吗？" : $"删除 {groups.Count} 个分组将同时删除组内所有执行目录，确定继续吗？";
+            if (MessageBox.Show(this, message, "确认删除分组", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            foreach (var group in groups) { _groups.Remove(group); _entries.RemoveAll(entry => string.Equals(entry.GroupId, group.Id, StringComparison.OrdinalIgnoreCase)); }
+            NormalizeOrders();
+            RefreshEntriesList(null);
+            return;
+        }
+        if (MessageBox.Show(this, $"确定删除选中的 {entries.Count} 个执行目录吗？", "确认删除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        foreach (var entry in entries) _entries.Remove(entry);
+        NormalizeOrders();
+        RefreshEntriesList(null);
+    }
+
+    private void NormalizeOrders()
+    {
+        for (var index = 0; index < _groups.Count; index++) _groups[index].DisplayOrder = index;
+        var ordered = _entries.OrderBy(entry => entry.DisplayOrder).ToList();
+        _entries.Clear();
+        _entries.AddRange(ordered);
+        for (var index = 0; index < _entries.Count; index++) _entries[index].DisplayOrder = index;
+    }
+
+    private ManagerRow? GetSingleSelectedRow() => _entriesListBox.SelectedItems.Count == 1 ? _entriesListBox.SelectedItem as ManagerRow : null;
+    private List<ExecutionDirectoryEntry> GetSelectedEntries() => _entriesListBox.SelectedItems.Cast<ManagerRow>().Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
 
     private void SaveAndClose()
     {
         ApplyDisplayNameChanges();
-        SelectedDirectoryPath = _entriesListBox.SelectedItem is ExecutionDirectoryEntry entry
-            ? entry.DirectoryPath
-            : _entries.FirstOrDefault()?.DirectoryPath;
-
+        NormalizeOrders();
+        SelectedDirectoryPath = _entriesListBox.SelectedItems.Cast<ManagerRow>().Select(row => row.Entry?.DirectoryPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.DirectoryPath;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private sealed class MultiSelectListBox : ListBox
+    {
+        private const int WmLButtonDown = 0x0201;
+        private const int WmLButtonUp = 0x0202;
+        private List<object>? _preservedSelectedItems;
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmLButtonDown && ModifierKeys == Keys.None)
+            {
+                var index = IndexFromPoint(PointToClient(Cursor.Position));
+                _preservedSelectedItems = index >= 0 &&
+                                            SelectedIndices.Count > 1 &&
+                                            SelectedIndices.Contains(index)
+                    ? SelectedItems.Cast<object>().ToList()
+                    : null;
+
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                return;
+            }
+
+            if (message.Msg == WmLButtonUp && _preservedSelectedItems is not null)
+            {
+                base.WndProc(ref message);
+                RestorePreservedSelection();
+                _preservedSelectedItems = null;
+                return;
+            }
+
+            base.WndProc(ref message);
+        }
+
+        private void RestorePreservedSelection()
+        {
+            if (_preservedSelectedItems is null)
+            {
+                return;
+            }
+
+            ClearSelected();
+            foreach (var selectedItem in _preservedSelectedItems)
+            {
+                var selectedIndex = Items.IndexOf(selectedItem);
+                if (selectedIndex >= 0)
+                {
+                    SetSelected(selectedIndex, true);
+                }
+            }
+        }
+    }    private sealed class DirectoryDragPayload
+    {
+        public DirectoryDragPayload(IReadOnlyList<ManagerRow> rows)
+        {
+            Entries = rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList();
+            Groups = rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList();
+        }
+        public IReadOnlyList<ExecutionDirectoryEntry> Entries { get; }
+        public IReadOnlyList<ExecutionDirectoryGroup> Groups { get; }
+    }
+    private sealed class ManagerRow
+    {
+        public ExecutionDirectoryGroup? Group { get; }
+        public ExecutionDirectoryEntry? Entry { get; }
+        private readonly bool _indented;
+        public ManagerRow(ExecutionDirectoryGroup group) => Group = group;
+        public ManagerRow(ExecutionDirectoryEntry entry, bool indented) { Entry = entry; _indented = indented; }
+        public override string ToString() => Group is not null ? $"{(Group.IsExpanded ? "▼" : "▶")} {Group.Name}" : (_indented ? $"    {Entry!.DisplayLabel}" : Entry!.DisplayLabel);
+    }
+
+    private sealed class GroupChoice(string? id, string name)
+    {
+        public string? Id { get; } = id;
+        public override string ToString() => name;
     }
 }

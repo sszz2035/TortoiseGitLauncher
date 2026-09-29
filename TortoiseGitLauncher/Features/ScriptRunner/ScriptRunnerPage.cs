@@ -172,14 +172,25 @@ internal sealed class ScriptRunnerPage : UserControl
         };
         _directoryComboBox.Format += (_, eventArgs) =>
         {
-            if (eventArgs.ListItem is ExecutionDirectoryEntry entry)
+            if (eventArgs.ListItem is ExecutionDirectoryGroupComboItem groupItem)
+            {
+                eventArgs.Value = groupItem.ToString();
+            }
+            else if (eventArgs.ListItem is ExecutionDirectoryEntryComboItem entryItem)
+            {
+                var entry = entryItem.Entry;
+                var label = Directory.Exists(entry.DirectoryPath)
+                    ? entry.DisplayLabel
+                    : $"{entry.DisplayLabel}（不可用）";
+                eventArgs.Value = entryItem.Indented ? $"    {label}" : label;
+            }
+            else if (eventArgs.ListItem is ExecutionDirectoryEntry entry)
             {
                 eventArgs.Value = Directory.Exists(entry.DirectoryPath)
                     ? entry.DisplayLabel
                     : $"{entry.DisplayLabel}（不可用）";
             }
-        };
-        _directoryComboBox.SelectedIndexChanged += (_, _) => SelectDirectoryFromComboBox();
+        };        _directoryComboBox.SelectedIndexChanged += (_, _) => SelectDirectoryFromComboBox();
         selectionRow.Controls.Add(_directoryComboBox, 0, 0);
 
         var browseButton = CreateActionButton(
@@ -658,6 +669,7 @@ internal sealed class ScriptRunnerPage : UserControl
     {
         using var dialog = new ExecutionDirectoryManagerForm(
             _settings.RecentDirectories,
+            _settings.DirectoryGroups,
             _selectedDirectory?.DirectoryPath);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
@@ -666,6 +678,8 @@ internal sealed class ScriptRunnerPage : UserControl
 
         _settings.RecentDirectories.Clear();
         _settings.RecentDirectories.AddRange(dialog.GetEntries());
+        _settings.DirectoryGroups.Clear();
+        _settings.DirectoryGroups.AddRange(dialog.GetGroups());
 
         var selectedEntry = string.IsNullOrWhiteSpace(dialog.SelectedDirectoryPath)
             ? null
@@ -702,8 +716,27 @@ internal sealed class ScriptRunnerPage : UserControl
             return;
         }
 
-        if (_directoryComboBox.SelectedItem is ExecutionDirectoryEntry entry)
+        if (_directoryComboBox.SelectedItem is ExecutionDirectoryGroupComboItem groupItem)
         {
+            groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
+            PersistSettings();
+            var selectedPath = _selectedDirectory?.DirectoryPath;
+            BeginInvoke((Action)(() =>
+            {
+                if (IsDisposed || Disposing)
+                {
+                    return;
+                }
+
+                RefreshDirectoryComboBox(selectedPath);
+                _directoryComboBox.DroppedDown = true;
+            }));
+            return;
+        }
+
+        if (_directoryComboBox.SelectedItem is ExecutionDirectoryEntryComboItem entryItem)
+        {
+            var entry = entryItem.Entry;
             SelectDirectoryEntry(
                 entry,
                 Directory.Exists(entry.DirectoryPath)
@@ -711,9 +744,20 @@ internal sealed class ScriptRunnerPage : UserControl
                     : "所选执行目录不存在或暂时不可访问。",
                 moveToTop: false,
                 saveImmediately: true);
+            return;
+        }
+
+        if (_directoryComboBox.SelectedItem is ExecutionDirectoryEntry directEntry)
+        {
+            SelectDirectoryEntry(
+                directEntry,
+                Directory.Exists(directEntry.DirectoryPath)
+                    ? "已从下拉框切换执行目录。"
+                    : "所选执行目录不存在或暂时不可访问。",
+                moveToTop: false,
+                saveImmediately: true);
         }
     }
-
     private void SelectDirectoryEntry(
         ExecutionDirectoryEntry entry,
         string statusMessage,
@@ -832,21 +876,48 @@ internal sealed class ScriptRunnerPage : UserControl
         {
             _directoryComboBox.BeginUpdate();
             _directoryComboBox.Items.Clear();
-            foreach (var entry in _settings.RecentDirectories)
+
+            var groupedEntries = _settings.RecentDirectories
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.GroupId))
+                .GroupBy(entry => entry.GroupId!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group
+                    .OrderBy(entry => entry.DisplayOrder)
+                    .ToList(), StringComparer.OrdinalIgnoreCase);
+            var topLevelItems = new List<(int Order, int Kind, object Item)>();
+            foreach (var group in _settings.DirectoryGroups.OrderBy(group => group.DisplayOrder))
             {
-                _directoryComboBox.Items.Add(entry);
+                topLevelItems.Add((group.DisplayOrder, 0, new ExecutionDirectoryGroupComboItem(group)));
+            }
+
+            foreach (var entry in _settings.RecentDirectories
+                         .Where(entry => string.IsNullOrWhiteSpace(entry.GroupId))
+                         .OrderBy(entry => entry.DisplayOrder))
+            {
+                topLevelItems.Add((entry.DisplayOrder, 1, new ExecutionDirectoryEntryComboItem(entry, indented: false)));
+            }
+
+            foreach (var item in topLevelItems.OrderBy(item => item.Order).ThenBy(item => item.Kind))
+            {
+                _directoryComboBox.Items.Add(item.Item);
+                if (item.Item is ExecutionDirectoryGroupComboItem groupItem &&
+                    groupItem.Group.IsExpanded &&
+                    groupedEntries.TryGetValue(groupItem.Group.Id, out var entries))
+                {
+                    foreach (var entry in entries)
+                    {
+                        _directoryComboBox.Items.Add(new ExecutionDirectoryEntryComboItem(entry, indented: true));
+                    }
+                }
             }
 
             var selectedIndex = -1;
             if (!string.IsNullOrWhiteSpace(selectedDirectoryPath))
             {
+                var normalizedPath = ScriptRunnerPathHelper.NormalizeDirectoryPath(selectedDirectoryPath);
                 for (var index = 0; index < _directoryComboBox.Items.Count; index++)
                 {
-                    if (_directoryComboBox.Items[index] is ExecutionDirectoryEntry entry &&
-                        string.Equals(
-                            entry.DirectoryPath,
-                            selectedDirectoryPath,
-                            StringComparison.OrdinalIgnoreCase))
+                    if (_directoryComboBox.Items[index] is ExecutionDirectoryEntryComboItem entryItem &&
+                        string.Equals(entryItem.Entry.DirectoryPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
                     {
                         selectedIndex = index;
                         break;
@@ -862,7 +933,6 @@ internal sealed class ScriptRunnerPage : UserControl
             _isUpdatingDirectoryComboBox = false;
         }
     }
-
     private bool PersistSettings(Label? statusLabel = null)
     {
         if (ScriptRunnerStore.TrySave(_settings, out var errorMessage))
