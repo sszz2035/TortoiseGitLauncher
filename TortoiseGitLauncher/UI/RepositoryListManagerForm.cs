@@ -37,19 +37,11 @@ internal sealed class RepositoryListManagerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Padding = new Padding(16)
         };
-        rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rootLayout.Controls.Add(new Label
-        {
-            Text = "可创建分组并整理仓库。先按 Ctrl 或 Shift 选中普通项，再点击“新建分组”可自动归入新组。",
-            AutoSize = true,
-            MaximumSize = new Size(980, 0),
-            Margin = new Padding(0, 0, 0, 12)
-        }, 0, 0);
 
         var contentLayout = new TableLayoutPanel
         {
@@ -151,9 +143,8 @@ internal sealed class RepositoryListManagerForm : Form
         rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
         _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_pathTextBox, 0, 7);
-        rightPanel.Controls.Add(new Label { Text = "组标题不可作为当前仓库选择；双击组标题可展开/收起。拖拽仓库到组或其他仓库可调整归属。", AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90), MaximumSize = new Size(450, 0) }, 0, 8);
         contentLayout.Controls.Add(rightPanel, 1, 0);
-        rootLayout.Controls.Add(contentLayout, 0, 1);
+        rootLayout.Controls.Add(contentLayout, 0, 0);
 
         var actionPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
         var cancelButton = CreateDialogButton("取消", Color.FromArgb(245, 245, 245));
@@ -163,7 +154,7 @@ internal sealed class RepositoryListManagerForm : Form
         saveButton.Margin = new Padding(10, 0, 0, 0);
         saveButton.Click += (_, _) => SaveAndClose();
         actionPanel.Controls.Add(saveButton);
-        rootLayout.Controls.Add(actionPanel, 0, 2);
+        rootLayout.Controls.Add(actionPanel, 0, 1);
         Controls.Add(rootLayout);
 
         RefreshEntriesList(selectedRepoRootPath);
