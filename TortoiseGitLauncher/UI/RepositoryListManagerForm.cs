@@ -7,13 +7,14 @@ internal sealed class RepositoryListManagerForm : Form
 {
     private readonly List<RepositoryEntry> _entries;
     private readonly List<RepositoryGroup> _groups;
-    private readonly ListBox _entriesListBox;
+    private readonly MultiSelectListBox _entriesListBox;
     private readonly TextBox _displayNameTextBox;
     private readonly TextBox _pathTextBox;
     private readonly TextBox _groupNameTextBox;
     private readonly Label _summaryLabel;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
+    private bool _isUpdatingEditor;
     private Point _dragStartPoint;
 
     public string? SelectedRepoRootPath { get; private set; }
@@ -37,19 +38,11 @@ internal sealed class RepositoryListManagerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 2,
             Padding = new Padding(16)
         };
-        rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         rootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        rootLayout.Controls.Add(new Label
-        {
-            Text = "可创建分组并整理仓库。先按 Ctrl 或 Shift 选中普通项，再点击“新建分组”可自动归入新组。",
-            AutoSize = true,
-            MaximumSize = new Size(980, 0),
-            Margin = new Padding(0, 0, 0, 12)
-        }, 0, 0);
 
         var contentLayout = new TableLayoutPanel
         {
@@ -130,30 +123,25 @@ internal sealed class RepositoryListManagerForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 7,
             Margin = new Padding(12, 0, 0, 0)
         };
-        for (var index = 0; index < 8; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var index = 0; index < 6; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rightPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
         rightPanel.Controls.Add(new Label { Text = "仓库显示名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) }, 0, 0);
-        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
+        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_displayNameTextBox, 0, 1);
-        var applyNameButton = CreateDialogButton("应用名称修改", Color.FromArgb(242, 246, 240));
-        applyNameButton.Click += (_, _) => ApplyDisplayNameChanges();
-        rightPanel.Controls.Add(applyNameButton, 0, 2);
-        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 3);
-        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
-        rightPanel.Controls.Add(_groupNameTextBox, 0, 4);
-        var applyGroupButton = CreateDialogButton("应用分组名称", Color.FromArgb(242, 246, 240));
-        applyGroupButton.Click += (_, _) => RenameSelectedGroup();
-        rightPanel.Controls.Add(applyGroupButton, 0, 5);
-        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
+        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 2);
+        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_groupNameTextBox, 0, 3);
+        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 4);
         _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
-        rightPanel.Controls.Add(_pathTextBox, 0, 7);
-        rightPanel.Controls.Add(new Label { Text = "组标题不可作为当前仓库选择；双击组标题可展开/收起。拖拽仓库到组或其他仓库可调整归属。", AutoSize = true, ForeColor = Color.FromArgb(90, 90, 90), MaximumSize = new Size(450, 0) }, 0, 8);
+        rightPanel.Controls.Add(_pathTextBox, 0, 5);
+        _displayNameTextBox.TextChanged += (_, _) => ApplyDisplayNameChanges();
+        _groupNameTextBox.TextChanged += (_, _) => RenameSelectedGroup();
         contentLayout.Controls.Add(rightPanel, 1, 0);
-        rootLayout.Controls.Add(contentLayout, 0, 1);
+        rootLayout.Controls.Add(contentLayout, 0, 0);
 
         var actionPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Margin = new Padding(0, 12, 0, 0) };
         var cancelButton = CreateDialogButton("取消", Color.FromArgb(245, 245, 245));
@@ -163,7 +151,7 @@ internal sealed class RepositoryListManagerForm : Form
         saveButton.Margin = new Padding(10, 0, 0, 0);
         saveButton.Click += (_, _) => SaveAndClose();
         actionPanel.Controls.Add(saveButton);
-        rootLayout.Controls.Add(actionPanel, 0, 2);
+        rootLayout.Controls.Add(actionPanel, 0, 1);
         Controls.Add(rootLayout);
 
         RefreshEntriesList(selectedRepoRootPath);
@@ -320,7 +308,7 @@ internal sealed class RepositoryListManagerForm : Form
     }
     private void EnforceSelectionType()
     {
-        if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
+        if (_isRefreshing || _isUpdatingSelection || _isUpdatingEditor || _entriesListBox.SelectedIndices.Count < 2) return;
         var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
         var hasGroup = rows.Any(row => row.Group is not null);
         var hasEntry = rows.Any(row => row.Entry is not null);
@@ -337,20 +325,36 @@ internal sealed class RepositoryListManagerForm : Form
 
     private void UpdateEditorFromSelection()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
         var entry = rows.Count == 1 ? rows[0].Entry : null;
         var group = rows.Count == 1 ? rows[0].Group : null;
-        _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
-        _pathTextBox.Text = entry?.RepoRootPath ?? string.Empty;
-        _groupNameTextBox.Text = group?.Name ?? string.Empty;
+        _isUpdatingEditor = true;
+        try
+        {
+            _displayNameTextBox.ReadOnly = entry is null;
+            _groupNameTextBox.ReadOnly = group is null;
+            _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
+            _pathTextBox.Text = entry?.RepoRootPath ?? string.Empty;
+            _groupNameTextBox.Text = group?.Name ?? string.Empty;
+        }
+        finally { _isUpdatingEditor = false; }
     }
 
     private void ApplyDisplayNameChanges()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var row = GetSingleSelectedRow();
         if (row?.Entry is null) return;
         row.Entry.DisplayName = _displayNameTextBox.Text.Trim();
-        RefreshEntriesList(row.Entry.RepoRootPath);
+        RefreshSelectedRow();
+    }
+
+    private void RefreshSelectedRow()
+    {
+        _isUpdatingEditor = true;
+        try { _entriesListBox.RefreshRow(_entriesListBox.SelectedIndex); }
+        finally { _isUpdatingEditor = false; }
     }
 
     private void CreateGroup()
@@ -367,17 +371,11 @@ internal sealed class RepositoryListManagerForm : Form
     }
     private void RenameSelectedGroup()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var row = GetSingleSelectedRow();
         if (row?.Group is null) return;
-        var name = _groupNameTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(name)) return;
-        if (_groups.Any(group => !ReferenceEquals(group, row.Group) && string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            MessageBox.Show(this, "分组名称不能重复。", "无法重命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-        row.Group.Name = name;
-        RefreshEntriesList(null, new[] { row.Group.Id });
+        row.Group.Name = _groupNameTextBox.Text.Trim();
+        RefreshSelectedRow();
     }
 
     private void ToggleSelectedGroup()
@@ -486,7 +484,18 @@ internal sealed class RepositoryListManagerForm : Form
 
     private void SaveAndClose()
     {
-        ApplyDisplayNameChanges();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in _groups)
+        {
+            var isEmpty = string.IsNullOrWhiteSpace(group.Name);
+            if (isEmpty || !names.Add(group.Name))
+            {
+                MessageBox.Show(this, isEmpty ? "分组名称不能为空。" : "分组名称不能重复。", "无法保存", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                RefreshEntriesList(null, new[] { group.Id });
+                _groupNameTextBox.Focus();
+                return;
+            }
+        }
         NormalizeOrders();
         SelectedRepoRootPath = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().Select(row => row.Entry?.RepoRootPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.RepoRootPath;
         DialogResult = DialogResult.OK;
@@ -495,6 +504,11 @@ internal sealed class RepositoryListManagerForm : Form
 
     private sealed class MultiSelectListBox : ListBox
     {
+        public void RefreshRow(int index)
+        {
+            if (index >= 0 && index < Items.Count) RefreshItem(index);
+        }
+
         private const int WmLButtonDown = 0x0201;
         private const int WmLButtonUp = 0x0202;
         private List<object>? _preservedSelectedItems;
