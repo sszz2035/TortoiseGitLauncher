@@ -72,8 +72,11 @@ internal static class RepositoryHistoryStore
         Save(settings);
     }
 
-    public static void Save(RepositoryHistorySettings settings)
+    public static void Save(RepositoryHistorySettings settings) => TrySave(settings, out _);
+
+    public static bool TrySave(RepositoryHistorySettings settings, out string? errorMessage)
     {
+        errorMessage = null;
         try
         {
             NormalizeSettings(settings);
@@ -85,9 +88,12 @@ internal static class RepositoryHistoryStore
 
             var json = JsonSerializer.Serialize(settings, JsonOptions);
             File.WriteAllText(StoragePath, json, new System.Text.UTF8Encoding(false));
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
+            errorMessage = ex.Message;
+            return false;
         }
     }
 
@@ -196,6 +202,7 @@ internal static class RepositoryHistoryStore
 
                 entry.RepoRootPath = GitPathHelper.NormalizePath(entry.RepoRootPath);
                 entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
+                entry.Notes ??= string.Empty;
                 sourceEntries.Add((entry, sourceIndex));
             }
             catch
@@ -280,6 +287,7 @@ internal static class RepositoryHistoryStore
             }
 
             entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
+            entry.Notes ??= string.Empty;
             entry.GroupId = !string.IsNullOrWhiteSpace(entry.GroupId) &&
                             knownGroupIds.Contains(entry.GroupId)
                 ? entry.GroupId

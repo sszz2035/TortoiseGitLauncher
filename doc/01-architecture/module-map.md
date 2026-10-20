@@ -23,6 +23,7 @@ TortoiseGitLauncher/
     RepositoryListManagerForm.cs
     Controls/
       CardPanel.cs
+      RepositoryDetailsControl.cs
     Icons/
       IconFactory.cs
   Models/
@@ -32,6 +33,7 @@ TortoiseGitLauncher/
     RepositoryHistoryStore.cs
     TortoiseGitLocator.cs
     GitPathHelper.cs
+    RepositoryBranchReader.cs
 ```
 
 ## 当前职责
@@ -44,9 +46,11 @@ TortoiseGitLauncher/
 | `UI/MainForm.RepositoryManagement.cs` | 仓库管理页及 TortoiseGit 命令交互 |
 | `UI/RepositoryListManagerForm.cs` | 仓库列表编辑对话框 |
 | `UI/Controls` | 可复用自绘控件 |
+| `UI/Controls/RepositoryDetailsControl.cs` | 仓库目录、分支和备注展示；后台分支刷新及过期结果隔离 |
 | `UI/Icons` | 内置矢量图标枚举和绘制 |
 | `Models` | 仓库与命令定义 |
 | `Services` | 仓库历史、Git 路径和 TortoiseGit 定位 |
+| `Services/RepositoryBranchReader.cs` | 只读解析工作目录的 HEAD，兼容 `.git` 目录及 gitdir 文件，不依赖 Git CLI |
 
 ## 脚本执行功能实际边界
 

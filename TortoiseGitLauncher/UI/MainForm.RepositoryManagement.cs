@@ -157,33 +157,21 @@ internal sealed partial class MainForm : Form
         selectionRow.Controls.Add(manageButton, 2, 0);
         layout.Controls.Add(selectionRow, 0, 1);
 
-        var currentPathRow = new TableLayoutPanel
+        _repositoryDetails = new RepositoryDetailsControl();
+        _repositoryDetails.NotesChanged += (_, _) =>
         {
-            Dock = DockStyle.Top,
-            ColumnCount = 2,
-            AutoSize = true,
-            BackColor = Color.Transparent
-        };
-        currentPathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        currentPathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        currentPathRow.Controls.Add(new Label
-        {
-            Text = "当前目标目录：",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point),
-            ForeColor = Color.FromArgb(74, 82, 94),
-            Margin = new Padding(0, 2, 8, 0)
-        }, 0, 0);
+            if (_selectedRepository is null)
+            {
+                return;
+            }
 
-        _selectedDirectoryValue = new Label
-        {
-            Text = "未选择仓库根目录",
-            AutoSize = true,
-            MaximumSize = new Size(980, 0),
-            ForeColor = Color.FromArgb(52, 60, 72)
+            _selectedRepository.Notes = _repositoryDetails.Notes;
+            _repositoryNotesDirty = true;
+            _repositoryNotesSaveTimer.Stop();
+            _repositoryNotesSaveTimer.Start();
         };
-        currentPathRow.Controls.Add(_selectedDirectoryValue, 1, 0);
-        layout.Controls.Add(currentPathRow, 0, 2);
+        _repositoryDetails.NotesEditCompleted += (_, _) => SaveRepositoryNotes();
+        layout.Controls.Add(_repositoryDetails, 0, 2);
 
         card.Controls.Add(layout);
         return card;
@@ -522,6 +510,11 @@ internal sealed partial class MainForm : Form
 
     private void OpenRepositoryManager()
     {
+        if (!SaveRepositoryNotes())
+        {
+            return;
+        }
+
         using var dialog = new RepositoryListManagerForm(_repositoryEntries, _repositorySettings.Groups, _selectedRepository?.RepoRootPath);
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
@@ -583,6 +576,12 @@ internal sealed partial class MainForm : Form
     }
     private void SelectRepositoryEntry(RepositoryEntry entry, string statusMessage, bool moveToTop, bool saveImmediately)
     {
+        if (!SaveRepositoryNotes())
+        {
+            RefreshRepoRootComboBox(_selectedRepository?.RepoRootPath);
+            return;
+        }
+
         if (moveToTop)
         {
             UpsertRepositoryEntry(entry.RepoRootPath, entry.DisplayName, moveToTop: true);
@@ -590,7 +589,7 @@ internal sealed partial class MainForm : Form
 
         _selectedRepository = FindRepositoryEntryByPath(entry.RepoRootPath) ?? entry;
         _selectedDirectory = _selectedRepository.RepoRootPath;
-        _selectedDirectoryValue.Text = _selectedDirectory;
+        _repositoryDetails.SetRepository(_selectedDirectory, _selectedRepository.Notes);
         RefreshRepoRootComboBox(_selectedRepository.RepoRootPath);
 
         if (saveImmediately)
@@ -604,9 +603,27 @@ internal sealed partial class MainForm : Form
     {
         _selectedRepository = null;
         _selectedDirectory = _launchDirectory;
-        _selectedDirectoryValue.Text = "未选择仓库根目录";
+        _repositoryDetails.SetRepository(null, null);
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
         SetStatus(statusMessage, isError);
+    }
+
+    private bool SaveRepositoryNotes()
+    {
+        _repositoryNotesSaveTimer.Stop();
+        if (!_repositoryNotesDirty)
+        {
+            return true;
+        }
+
+        if (!RepositoryHistoryStore.TrySave(_repositorySettings, out var errorMessage))
+        {
+            SetStatus($"仓库备注保存失败：{errorMessage}", isError: true);
+            return false;
+        }
+
+        _repositoryNotesDirty = false;
+        return true;
     }
 
     private RepositoryEntry UpsertRepositoryEntry(string repoRootPath, string? displayName, bool moveToTop)

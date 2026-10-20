@@ -11,7 +11,9 @@ internal sealed partial class MainForm : Form
     private Control _repositoryManagementPage = null!;
     private ScriptRunnerPage _scriptRunnerPage = null!;
 
-    private Label _selectedDirectoryValue = null!;
+    private RepositoryDetailsControl _repositoryDetails = null!;
+    private readonly System.Windows.Forms.Timer _repositoryNotesSaveTimer = new() { Interval = 500 };
+    private bool _repositoryNotesDirty;
     private ComboBox _repoRootComboBox = null!;
     private Label _statusValue = null!;
     private readonly string _launchDirectory;
@@ -107,6 +109,10 @@ internal sealed partial class MainForm : Form
         shellLayout.Controls.Add(CreatePageHost(initialSelection?.RepoRootPath), 1, 0);
         Controls.Add(shellLayout);
 
+        _repositoryNotesSaveTimer.Tick += (_, _) => SaveRepositoryNotes();
+        Activated += (_, _) => _ = _repositoryDetails.RefreshBranchAsync();
+        FormClosed += (_, _) => _repositoryNotesSaveTimer.Dispose();
+
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
 
         if (initialSelection is not null)
@@ -125,6 +131,14 @@ internal sealed partial class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs eventArgs)
     {
+        if (!SaveRepositoryNotes())
+        {
+            eventArgs.Cancel = true;
+            MessageBox.Show(this, "仓库备注保存失败，请检查配置目录的写入权限后重试。", "无法保存备注",
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         var runningCount = _scriptRunnerPage.RunningInstanceCount;
         if (eventArgs.CloseReason == CloseReason.UserClosing &&
             runningCount > 0)
@@ -245,6 +259,10 @@ internal sealed partial class MainForm : Form
         }
 
         page.BringToFront();
+        if (ReferenceEquals(page, _repositoryManagementPage))
+        {
+            _ = _repositoryDetails.RefreshBranchAsync();
+        }
         SetSidebarButtonActive(_repositoryNavigationButton, ReferenceEquals(page, _repositoryManagementPage));
         SetSidebarButtonActive(_scriptRunnerNavigationButton, ReferenceEquals(page, _scriptRunnerPage));
     }

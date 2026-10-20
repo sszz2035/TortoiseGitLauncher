@@ -41,6 +41,8 @@ internal sealed class RepositoryEntry
 
     public string RepoRootPath { get; set; } = string.Empty;
 
+    public string Notes { get; set; } = string.Empty;
+
     public string? GroupId { get; set; }
 
     public int DisplayOrder { get; set; }
@@ -56,6 +58,7 @@ internal sealed class RepositoryEntry
         {
             DisplayName = DisplayName,
             RepoRootPath = RepoRootPath,
+            Notes = Notes,
             GroupId = GroupId,
             DisplayOrder = DisplayOrder
         };
