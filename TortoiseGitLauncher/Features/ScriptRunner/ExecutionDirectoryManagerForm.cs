@@ -7,7 +7,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
 {
     private readonly List<ExecutionDirectoryEntry> _entries;
     private readonly List<ExecutionDirectoryGroup> _groups;
-    private readonly ListBox _entriesListBox;
+    private readonly MultiSelectListBox _entriesListBox;
     private readonly TextBox _displayNameTextBox;
     private readonly TextBox _groupNameTextBox;
     private readonly TextBox _pathTextBox;
@@ -15,6 +15,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     private readonly Label _summaryLabel;
     private bool _isRefreshing;
     private bool _isUpdatingSelection;
+    private bool _isUpdatingEditor;
     private Point _dragStartPoint;
 
     public string? SelectedDirectoryPath { get; private set; }
@@ -108,26 +109,22 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         leftPanel.Controls.Add(operationPanel, 0, 3);
         contentLayout.Controls.Add(leftPanel, 0, 0);
 
-        var rightPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 9, Margin = new Padding(12, 0, 0, 0) };
-        for (var index = 0; index < 8; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var rightPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Margin = new Padding(12, 0, 0, 0) };
+        for (var index = 0; index < 6; index++) rightPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         rightPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         rightPanel.Controls.Add(new Label { Text = "目录显示名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) }, 0, 0);
-        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
+        _displayNameTextBox = new TextBox { Dock = DockStyle.Top, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
         rightPanel.Controls.Add(_displayNameTextBox, 0, 1);
-        var applyNameButton = CreateDialogButton("应用名称修改", Color.FromArgb(242, 246, 240));
-        applyNameButton.Click += (_, _) => ApplyDisplayNameChanges();
-        rightPanel.Controls.Add(applyNameButton, 0, 2);
-        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 3);
-        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, Margin = new Padding(0, 0, 0, 8) };
-        rightPanel.Controls.Add(_groupNameTextBox, 0, 4);
-        var applyGroupButton = CreateDialogButton("应用分组名称", Color.FromArgb(242, 246, 240));
-        applyGroupButton.Click += (_, _) => RenameSelectedGroup();
-        rightPanel.Controls.Add(applyGroupButton, 0, 5);
-        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 6);
+        rightPanel.Controls.Add(new Label { Text = "分组名称", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 2);
+        _groupNameTextBox = new TextBox { Dock = DockStyle.Top, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
+        rightPanel.Controls.Add(_groupNameTextBox, 0, 3);
+        rightPanel.Controls.Add(new Label { Text = "实际路径", AutoSize = true, Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold), Margin = new Padding(0, 14, 0, 6) }, 0, 4);
         _pathTextBox = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Margin = new Padding(0, 0, 0, 8) };
-        rightPanel.Controls.Add(_pathTextBox, 0, 7);
+        rightPanel.Controls.Add(_pathTextBox, 0, 5);
         _pathStatusLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
-        rightPanel.Controls.Add(_pathStatusLabel, 0, 8);
+        rightPanel.Controls.Add(_pathStatusLabel, 0, 6);
+        _displayNameTextBox.TextChanged += (_, _) => ApplyDisplayNameChanges();
+        _groupNameTextBox.TextChanged += (_, _) => RenameSelectedGroup();
         contentLayout.Controls.Add(rightPanel, 1, 0);
         rootLayout.Controls.Add(contentLayout, 0, 1);
 
@@ -273,7 +270,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     }
     private void EnforceSelectionType()
     {
-        if (_isRefreshing || _isUpdatingSelection || _entriesListBox.SelectedIndices.Count < 2) return;
+        if (_isRefreshing || _isUpdatingSelection || _isUpdatingEditor || _entriesListBox.SelectedIndices.Count < 2) return;
         var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
         if (!rows.Any(row => row.Group is not null) || !rows.Any(row => row.Entry is not null)) return;
         _isUpdatingSelection = true;
@@ -288,12 +285,20 @@ internal sealed class ExecutionDirectoryManagerForm : Form
 
     private void UpdateEditorFromSelection()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var rows = _entriesListBox.SelectedItems.Cast<ManagerRow>().ToList();
         var entry = rows.Count == 1 ? rows[0].Entry : null;
         var group = rows.Count == 1 ? rows[0].Group : null;
-        _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
-        _pathTextBox.Text = entry?.DirectoryPath ?? string.Empty;
-        _groupNameTextBox.Text = group?.Name ?? string.Empty;
+        _isUpdatingEditor = true;
+        try
+        {
+            _displayNameTextBox.ReadOnly = entry is null;
+            _groupNameTextBox.ReadOnly = group is null;
+            _displayNameTextBox.Text = entry?.DisplayName ?? string.Empty;
+            _pathTextBox.Text = entry?.DirectoryPath ?? string.Empty;
+            _groupNameTextBox.Text = group?.Name ?? string.Empty;
+        }
+        finally { _isUpdatingEditor = false; }
         if (entry is null) { _pathStatusLabel.Text = string.Empty; return; }
         var available = Directory.Exists(entry.DirectoryPath);
         _pathStatusLabel.Text = available ? "目录可用" : "目录不存在或暂时不可访问";
@@ -302,10 +307,18 @@ internal sealed class ExecutionDirectoryManagerForm : Form
 
     private void ApplyDisplayNameChanges()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var row = GetSingleSelectedRow();
         if (row?.Entry is null) return;
         row.Entry.DisplayName = _displayNameTextBox.Text.Trim();
-        RefreshEntriesList(row.Entry.DirectoryPath);
+        RefreshSelectedRow();
+    }
+
+    private void RefreshSelectedRow()
+    {
+        _isUpdatingEditor = true;
+        try { _entriesListBox.RefreshRow(_entriesListBox.SelectedIndex); }
+        finally { _isUpdatingEditor = false; }
     }
 
     private void CreateGroup()
@@ -322,17 +335,11 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     }
     private void RenameSelectedGroup()
     {
+        if (_isRefreshing || _isUpdatingEditor) return;
         var row = GetSingleSelectedRow();
         if (row?.Group is null) return;
-        var name = _groupNameTextBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(name)) return;
-        if (_groups.Any(group => !ReferenceEquals(group, row.Group) && string.Equals(group.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            MessageBox.Show(this, "分组名称不能重复。", "无法重命名", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-        row.Group.Name = name;
-        RefreshEntriesList(null, new[] { row.Group.Id });
+        row.Group.Name = _groupNameTextBox.Text.Trim();
+        RefreshSelectedRow();
     }
 
     private void ToggleSelectedGroup()
@@ -432,7 +439,18 @@ internal sealed class ExecutionDirectoryManagerForm : Form
 
     private void SaveAndClose()
     {
-        ApplyDisplayNameChanges();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in _groups)
+        {
+            var isEmpty = string.IsNullOrWhiteSpace(group.Name);
+            if (isEmpty || !names.Add(group.Name))
+            {
+                MessageBox.Show(this, isEmpty ? "分组名称不能为空。" : "分组名称不能重复。", "无法保存", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                RefreshEntriesList(null, new[] { group.Id });
+                _groupNameTextBox.Focus();
+                return;
+            }
+        }
         NormalizeOrders();
         SelectedDirectoryPath = _entriesListBox.SelectedItems.Cast<ManagerRow>().Select(row => row.Entry?.DirectoryPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.DirectoryPath;
         DialogResult = DialogResult.OK;
@@ -441,6 +459,11 @@ internal sealed class ExecutionDirectoryManagerForm : Form
 
     private sealed class MultiSelectListBox : ListBox
     {
+        public void RefreshRow(int index)
+        {
+            if (index >= 0 && index < Items.Count) RefreshItem(index);
+        }
+
         private const int WmLButtonDown = 0x0201;
         private const int WmLButtonUp = 0x0202;
         private List<object>? _preservedSelectedItems;
