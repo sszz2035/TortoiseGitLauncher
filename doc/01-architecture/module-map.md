@@ -34,6 +34,7 @@ TortoiseGitLauncher/
     TortoiseGitLocator.cs
     GitPathHelper.cs
     RepositoryBranchReader.cs
+    RepositoryCommitReader.cs
 ```
 
 ## 当前职责
@@ -46,11 +47,12 @@ TortoiseGitLauncher/
 | `UI/MainForm.RepositoryManagement.cs` | 仓库管理页及 TortoiseGit 命令交互 |
 | `UI/RepositoryListManagerForm.cs` | 仓库列表编辑对话框 |
 | `UI/Controls` | 可复用自绘控件 |
-| `UI/Controls/RepositoryDetailsControl.cs` | 仓库目录、分支和备注展示；后台分支刷新及过期结果隔离 |
+| `UI/Controls/RepositoryDetailsControl.cs` | 仓库目录、分支、最新提交时间和备注展示；可见时后台轮询、过期结果隔离与生命周期清理 |
 | `UI/Icons` | 内置矢量图标枚举和绘制 |
 | `Models` | 仓库与命令定义 |
 | `Services` | 仓库历史、Git 路径和 TortoiseGit 定位 |
 | `Services/RepositoryBranchReader.cs` | 只读解析工作目录的 HEAD，兼容 `.git` 目录及 gitdir 文件，不依赖 Git CLI |
+| `Services/RepositoryCommitReader.cs` | 定位本机 Git，通过有超时的只读命令查询 HEAD 提交者时间并转换为本机时区 |
 
 ## 脚本执行功能实际边界
 
