@@ -65,6 +65,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
             IntegralHeight = false,
             HorizontalScrollbar = true,
             SelectionMode = SelectionMode.MultiExtended,
+            AllowDrop = true,
             Margin = new Padding(0, 0, 0, 10)
         };
         _entriesListBox.SelectedIndexChanged += (_, _) => EnforceSelectionType();
