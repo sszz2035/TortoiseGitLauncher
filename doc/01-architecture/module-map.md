@@ -28,9 +28,11 @@ TortoiseGitLauncher/
       IconFactory.cs
   Models/
     CommandDefinitions.cs
+    DirectoryPage.cs
     RepositoryEntry.cs
   Services/
     RepositoryHistoryStore.cs
+    SafeConfigurationFile.cs
     TortoiseGitLocator.cs
     GitPathHelper.cs
     RepositoryBranchReader.cs
@@ -49,8 +51,9 @@ TortoiseGitLauncher/
 | `UI/Controls` | 可复用自绘控件 |
 | `UI/Controls/RepositoryDetailsControl.cs` | 仓库目录、分支、最新提交时间和备注展示；可见时后台轮询、过期结果隔离与生命周期清理 |
 | `UI/Icons` | 内置矢量图标枚举和绘制 |
-| `Models` | 仓库与命令定义 |
+| `Models` | 仓库与命令定义，DirectoryPage 提供页标识、页名、排序和页级选择的共同元数据 |
 | `Services` | 仓库历史、Git 路径和 TortoiseGit 定位 |
+| `Services/SafeConfigurationFile.cs` | 配置版本保护、迁移备份、落盘刷新及原子替换 |
 | `Services/RepositoryBranchReader.cs` | 只读解析工作目录的 HEAD，兼容 `.git` 目录及 gitdir 文件，不依赖 Git CLI |
 | `Services/RepositoryCommitReader.cs` | 定位本机 Git，通过有超时的只读命令查询 HEAD 提交者时间并转换为本机时区 |
 

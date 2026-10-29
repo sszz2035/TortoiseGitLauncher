@@ -842,13 +842,6 @@ internal sealed class ScriptRunnerPage : UserControl
             }
         }
 
-        if (_settings.RecentDirectories.Count > ScriptRunnerStore.MaxRecentDirectoryCount)
-        {
-            _settings.RecentDirectories.RemoveRange(
-                ScriptRunnerStore.MaxRecentDirectoryCount,
-                _settings.RecentDirectories.Count - ScriptRunnerStore.MaxRecentDirectoryCount);
-        }
-
         return existing;
     }
 

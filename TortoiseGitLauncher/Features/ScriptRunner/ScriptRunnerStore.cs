@@ -5,8 +5,6 @@ namespace TortoiseGitLauncher;
 
 internal static class ScriptRunnerStore
 {
-    public const int MaxRecentDirectoryCount = 20;
-
     private static readonly string StoragePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "TortoiseGitLauncher",
@@ -14,81 +12,118 @@ internal static class ScriptRunnerStore
 
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
-    public static ScriptRunnerSettings Load(out string? warningMessage)
+    public static ScriptRunnerSettings Load(out string? warningMessage) => LoadFrom(StoragePath, out warningMessage);
+
+    internal static ScriptRunnerSettings LoadFrom(string path, out string? warningMessage)
     {
         warningMessage = null;
-        if (!File.Exists(StoragePath))
+        if (!File.Exists(path))
         {
             return new ScriptRunnerSettings();
         }
 
         try
         {
-            var json = File.ReadAllText(StoragePath);
+            return Parse(File.ReadAllText(path), out warningMessage);
+        }
+        catch (Exception ex)
+        {
+            warningMessage = $"读取脚本执行配置失败，已阻止保存以保护原文件。{Environment.NewLine}{ex.Message}";
+            return new ScriptRunnerSettings { SaveBlockedReason = warningMessage };
+        }
+    }
+
+    internal static ScriptRunnerSettings Parse(string json, out string? warningMessage)
+    {
+        warningMessage = null;
+        try
+        {
             using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                warningMessage = "脚本执行配置格式无效，已使用默认配置。";
-                return new ScriptRunnerSettings();
-            }
-
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("脚本执行配置格式无效。");
+            var version = SafeConfigurationFile.ReadVersion(root, ScriptRunnerSettings.CurrentVersion);
             var settings = new ScriptRunnerSettings();
-            if (document.RootElement.TryGetProperty(nameof(ScriptRunnerSettings.LastSelectedDirectoryPath), out var selectedElement) &&
-                selectedElement.ValueKind == JsonValueKind.String)
+            var skippedGroups = 0;
+            var skippedDirectories = 0;
+            var migrated = false;
+            if (root.TryGetProperty(nameof(ScriptRunnerSettings.Pages), out var pages))
             {
-                settings.LastSelectedDirectoryPath = NormalizeOptionalDirectoryPath(selectedElement.GetString());
+                if (pages.ValueKind != JsonValueKind.Array)
+                    throw new InvalidDataException("目录页集合格式无效。");
+                settings.Pages.Clear();
+                var sourceIndex = 0;
+                foreach (var element in pages.EnumerateArray())
+                {
+                    if (element.ValueKind != JsonValueKind.Object ||
+                        !element.TryGetProperty("DirectoryGroups", out var groups) || groups.ValueKind != JsonValueKind.Array ||
+                        !element.TryGetProperty("RecentDirectories", out var directories) || directories.ValueKind != JsonValueKind.Array)
+                    {
+                        skippedDirectories++;
+                        sourceIndex++;
+                        continue;
+                    }
+
+                    var page = new ExecutionDirectoryPage
+                    {
+                        Id = SafeConfigurationFile.ReadString(element, "Id", Guid.NewGuid().ToString("D")),
+                        Name = SafeConfigurationFile.ReadString(element, "Name", "未命名页"),
+                        DisplayOrder = SafeConfigurationFile.ReadOrder(element, sourceIndex++),
+                        LastSelectedDirectoryPath = NormalizeOptionalDirectoryPath(
+                            SafeConfigurationFile.ReadString(element, "LastSelectedDirectoryPath"))
+                    };
+                    skippedGroups += LoadDirectoryGroups(element, page);
+                    skippedDirectories += LoadDirectories(element, page);
+                    settings.Pages.Add(page);
+                }
+
+                if (settings.Pages.Count == 0)
+                    throw new InvalidDataException("没有可恢复的目录页，已保护原文件。");
+                settings.LastSelectedPageId = SafeConfigurationFile.ReadString(root, "LastSelectedPageId");
+            }
+            else
+            {
+                if (version >= ScriptRunnerSettings.CurrentVersion)
+                    throw new InvalidDataException("新版配置缺少目录页集合。");
+                settings.LastSelectedDirectoryPath = NormalizeOptionalDirectoryPath(
+                    SafeConfigurationFile.ReadString(root, "LastSelectedDirectoryPath"));
+                skippedGroups = LoadDirectoryGroups(root, settings.ActivePage);
+                skippedDirectories = LoadDirectories(root, settings.ActivePage);
+                migrated = true;
             }
 
-            var skippedGroups = LoadDirectoryGroups(document.RootElement, settings);
-            var skippedDirectories = LoadDirectories(document.RootElement, settings);
-            var skippedScripts = LoadScripts(document.RootElement, settings);
+            var skippedScripts = LoadScripts(root, settings);
             NormalizeDirectorySettings(settings);
-            warningMessage = BuildSkippedEntriesWarning(
-                skippedGroups,
-                skippedDirectories,
-                skippedScripts);
+            warningMessage = BuildSkippedEntriesWarning(skippedGroups, skippedDirectories, skippedScripts);
+            if (migrated)
+                warningMessage = "已将旧版执行目录完整迁移到默认页，脚本仍全局共享。" + warningMessage;
             return settings;
         }
         catch (Exception ex)
         {
-            warningMessage = $"读取脚本执行配置失败，已使用默认配置。{Environment.NewLine}{ex.Message}";
-            return new ScriptRunnerSettings();
+            warningMessage = $"读取脚本执行配置失败，已阻止保存以保护原文件。{Environment.NewLine}{ex.Message}";
+            return new ScriptRunnerSettings { SaveBlockedReason = warningMessage };
         }
     }
 
-    public static bool TrySave(ScriptRunnerSettings settings, out string? errorMessage)
+    public static bool TrySave(ScriptRunnerSettings settings, out string? errorMessage) =>
+        TrySaveTo(StoragePath, settings, out errorMessage);
+
+    internal static bool TrySaveTo(string path, ScriptRunnerSettings settings, out string? errorMessage)
     {
-        var temporaryPath = StoragePath + ".tmp";
         try
         {
-            var directory = Path.GetDirectoryName(StoragePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            settings.Version = ScriptRunnerSettings.CurrentVersion;
+            if (settings.SaveBlockedReason is not null)
+                throw new InvalidOperationException(settings.SaveBlockedReason);
             NormalizeDirectorySettings(settings);
             NormalizeScriptOrder(settings.Scripts);
             var json = JsonSerializer.Serialize(settings, JsonOptions);
-            File.WriteAllText(temporaryPath, json, new System.Text.UTF8Encoding(false));
-            File.Move(temporaryPath, StoragePath, overwrite: true);
+            SafeConfigurationFile.Write(path, json, ScriptRunnerSettings.CurrentVersion);
             errorMessage = null;
             return true;
         }
         catch (Exception ex)
         {
-            try
-            {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
-            }
-            catch
-            {
-            }
-
             errorMessage = ex.Message;
             return false;
         }
@@ -96,7 +131,7 @@ internal static class ScriptRunnerStore
 
     private static int LoadDirectoryGroups(
         JsonElement rootElement,
-        ScriptRunnerSettings settings)
+        ExecutionDirectoryPage settings)
     {
         if (!rootElement.TryGetProperty(nameof(ScriptRunnerSettings.DirectoryGroups), out var groupsElement) ||
             groupsElement.ValueKind != JsonValueKind.Array)
@@ -151,7 +186,7 @@ internal static class ScriptRunnerStore
         return skippedEntries;
     }
 
-    private static int LoadDirectories(JsonElement rootElement, ScriptRunnerSettings settings)
+    private static int LoadDirectories(JsonElement rootElement, ExecutionDirectoryPage settings)
     {
         var skippedEntries = 0;
         if (!rootElement.TryGetProperty(nameof(ScriptRunnerSettings.RecentDirectories), out var directoriesElement) ||
@@ -164,11 +199,6 @@ internal static class ScriptRunnerStore
         var sourceIndex = 0;
         foreach (var element in directoriesElement.EnumerateArray())
         {
-            if (sourceEntries.Count >= MaxRecentDirectoryCount)
-            {
-                break;
-            }
-
             try
             {
                 var entry = JsonSerializer.Deserialize<ExecutionDirectoryEntry>(
@@ -183,6 +213,7 @@ internal static class ScriptRunnerStore
 
                 entry.DirectoryPath = ScriptRunnerPathHelper.NormalizeDirectoryPath(entry.DirectoryPath);
                 entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
+                entry.Notes ??= string.Empty;
                 if (!element.TryGetProperty(nameof(ExecutionDirectoryEntry.DisplayOrder), out _))
                 {
                     entry.DisplayOrder = sourceIndex;
@@ -296,6 +327,17 @@ internal static class ScriptRunnerStore
     private static void NormalizeDirectorySettings(ScriptRunnerSettings settings)
     {
         settings.Version = ScriptRunnerSettings.CurrentVersion;
+        settings.Pages ??= [];
+        settings.Scripts ??= [];
+        settings.LastSelectedPageId = DirectoryPageCollection.Normalize(settings.Pages, settings.LastSelectedPageId);
+        foreach (var page in settings.Pages)
+        {
+            NormalizeDirectoryPage(page);
+        }
+    }
+
+    private static void NormalizeDirectoryPage(ExecutionDirectoryPage settings)
+    {
         settings.DirectoryGroups ??= [];
         settings.RecentDirectories ??= [];
 
@@ -306,7 +348,6 @@ internal static class ScriptRunnerStore
             var group = settings.DirectoryGroups[index];
             group.Id = EnsureUniqueGuid(group.Id, usedGroupIds);
             group.Name = EnsureUniqueGroupName(group.Name, usedGroupNames);
-            group.DisplayOrder = index;
         }
 
         var knownGroupIds = settings.DirectoryGroups
@@ -342,19 +383,12 @@ internal static class ScriptRunnerStore
             }
 
             entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
+            entry.Notes ??= string.Empty;
             entry.GroupId = !string.IsNullOrWhiteSpace(entry.GroupId) &&
                             knownGroupIds.Contains(entry.GroupId)
                 ? entry.GroupId
                 : null;
-            entry.DisplayOrder = normalizedEntries.Count;
             normalizedEntries.Add(entry);
-        }
-
-        if (normalizedEntries.Count > MaxRecentDirectoryCount)
-        {
-            normalizedEntries.RemoveRange(
-                MaxRecentDirectoryCount,
-                normalizedEntries.Count - MaxRecentDirectoryCount);
         }
 
         settings.RecentDirectories.Clear();

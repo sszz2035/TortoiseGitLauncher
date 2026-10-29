@@ -15,79 +15,119 @@ internal static class RepositoryHistoryStore
         WriteIndented = true
     };
 
-    public static List<RepositoryEntry> Load() =>
-        LoadSettings(out _).Entries;
+    public static RepositoryHistorySettings LoadSettings(out string? warningMessage) =>
+        LoadSettingsFrom(StoragePath, out warningMessage);
 
-    public static RepositoryHistorySettings LoadSettings(out string? warningMessage)
+    internal static RepositoryHistorySettings LoadSettingsFrom(string path, out string? warningMessage)
     {
         warningMessage = null;
-        if (!File.Exists(StoragePath))
+        if (!File.Exists(path))
         {
             return new RepositoryHistorySettings();
         }
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(StoragePath));
-            if (document.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                var migratedSettings = new RepositoryHistorySettings();
-                var migratedSkippedEntries = LoadEntries(document.RootElement, migratedSettings, allowLegacyStrings: true);
-                NormalizeSettings(migratedSettings);
-                warningMessage = BuildWarning(migratedSkippedEntries, migrated: true);
-                return migratedSettings;
-            }
+            return Parse(File.ReadAllText(path), out warningMessage);
+        }
+        catch (Exception ex)
+        {
+            warningMessage = $"读取仓库历史配置失败，已阻止保存以保护原文件。{Environment.NewLine}{ex.Message}";
+            return new RepositoryHistorySettings { SaveBlockedReason = warningMessage };
+        }
+    }
 
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                warningMessage = "仓库历史配置格式无效，已使用默认配置。";
-                return new RepositoryHistorySettings();
-            }
-
+    internal static RepositoryHistorySettings Parse(string json, out string? warningMessage)
+    {
+        warningMessage = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            var version = SafeConfigurationFile.ReadVersion(root, RepositoryHistorySettings.CurrentVersion);
             var settings = new RepositoryHistorySettings();
-            var skippedGroups = LoadGroups(document.RootElement, settings);
-            var skippedEntries = LoadEntries(
-                document.RootElement,
-                settings,
-                allowLegacyStrings: false);
+            var skipped = 0;
+            var migrated = false;
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                skipped = LoadEntries(root, settings.ActivePage, allowLegacyStrings: true);
+                migrated = true;
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty(nameof(RepositoryHistorySettings.Pages), out var pages))
+                {
+                    if (pages.ValueKind != JsonValueKind.Array)
+                        throw new InvalidDataException("目录页集合格式无效。");
+                    settings.Pages.Clear();
+                    var sourceIndex = 0;
+                    foreach (var element in pages.EnumerateArray())
+                    {
+                        if (element.ValueKind != JsonValueKind.Object ||
+                            !element.TryGetProperty("Groups", out var groups) || groups.ValueKind != JsonValueKind.Array ||
+                            !element.TryGetProperty("Entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                        {
+                            skipped++;
+                            sourceIndex++;
+                            continue;
+                        }
+
+                        var page = new RepositoryDirectoryPage
+                        {
+                            Id = SafeConfigurationFile.ReadString(element, "Id", Guid.NewGuid().ToString("D")),
+                            Name = SafeConfigurationFile.ReadString(element, "Name", "未命名页"),
+                            DisplayOrder = SafeConfigurationFile.ReadOrder(element, sourceIndex++),
+                            LastSelectedDirectoryPath = SafeConfigurationFile.ReadString(element, "LastSelectedDirectoryPath")
+                        };
+                        skipped += LoadGroups(element, page);
+                        skipped += LoadEntries(element, page, allowLegacyStrings: false);
+                        settings.Pages.Add(page);
+                    }
+
+                    if (settings.Pages.Count == 0)
+                        throw new InvalidDataException("没有可恢复的目录页，已保护原文件。");
+                    settings.LastSelectedPageId = SafeConfigurationFile.ReadString(root, "LastSelectedPageId");
+                }
+                else
+                {
+                    if (version >= RepositoryHistorySettings.CurrentVersion)
+                        throw new InvalidDataException("新版配置缺少目录页集合。");
+                    skipped = LoadGroups(root, settings.ActivePage) +
+                              LoadEntries(root, settings.ActivePage, allowLegacyStrings: false);
+                    migrated = true;
+                }
+            }
+            else
+            {
+                throw new InvalidDataException("仓库历史配置格式无效。");
+            }
+
             NormalizeSettings(settings);
-            warningMessage = BuildWarning(
-                skippedGroups + skippedEntries,
-                migrated: false);
+            warningMessage = BuildWarning(skipped, migrated);
             return settings;
         }
         catch (Exception ex)
         {
-            warningMessage = $"读取仓库历史配置失败，已使用默认配置。{Environment.NewLine}{ex.Message}";
-            return new RepositoryHistorySettings();
+            warningMessage = $"读取仓库历史配置失败，已阻止保存以保护原文件。{Environment.NewLine}{ex.Message}";
+            return new RepositoryHistorySettings { SaveBlockedReason = warningMessage };
         }
-    }
-
-    public static void Save(IReadOnlyCollection<RepositoryEntry> repoEntries)
-    {
-        var settings = new RepositoryHistorySettings
-        {
-            Entries = repoEntries.Select(entry => entry.Clone()).ToList()
-        };
-        Save(settings);
     }
 
     public static void Save(RepositoryHistorySettings settings) => TrySave(settings, out _);
 
-    public static bool TrySave(RepositoryHistorySettings settings, out string? errorMessage)
+    public static bool TrySave(RepositoryHistorySettings settings, out string? errorMessage) =>
+        TrySaveTo(StoragePath, settings, out errorMessage);
+
+    internal static bool TrySaveTo(string path, RepositoryHistorySettings settings, out string? errorMessage)
     {
         errorMessage = null;
         try
         {
+            if (settings.SaveBlockedReason is not null)
+                throw new InvalidOperationException(settings.SaveBlockedReason);
             NormalizeSettings(settings);
-            var directory = Path.GetDirectoryName(StoragePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
             var json = JsonSerializer.Serialize(settings, JsonOptions);
-            File.WriteAllText(StoragePath, json, new System.Text.UTF8Encoding(false));
+            SafeConfigurationFile.Write(path, json, RepositoryHistorySettings.CurrentVersion);
             return true;
         }
         catch (Exception ex)
@@ -99,7 +139,7 @@ internal static class RepositoryHistoryStore
 
     private static int LoadGroups(
         JsonElement rootElement,
-        RepositoryHistorySettings settings)
+        RepositoryDirectoryPage settings)
     {
         if (!rootElement.TryGetProperty(nameof(RepositoryHistorySettings.Groups), out var groupsElement) ||
             groupsElement.ValueKind != JsonValueKind.Array)
@@ -152,7 +192,7 @@ internal static class RepositoryHistoryStore
 
     private static int LoadEntries(
         JsonElement entriesElement,
-        RepositoryHistorySettings settings,
+        RepositoryDirectoryPage settings,
         bool allowLegacyStrings)
     {
         JsonElement arrayElement;
@@ -241,6 +281,16 @@ internal static class RepositoryHistoryStore
     private static void NormalizeSettings(RepositoryHistorySettings settings)
     {
         settings.Version = RepositoryHistorySettings.CurrentVersion;
+        settings.Pages ??= [];
+        settings.LastSelectedPageId = DirectoryPageCollection.Normalize(settings.Pages, settings.LastSelectedPageId);
+        foreach (var page in settings.Pages)
+        {
+            NormalizePage(page);
+        }
+    }
+
+    private static void NormalizePage(RepositoryDirectoryPage settings)
+    {
         settings.Groups ??= [];
         settings.Entries ??= [];
 
@@ -251,7 +301,6 @@ internal static class RepositoryHistoryStore
             var group = settings.Groups[index];
             group.Id = EnsureUniqueGuid(group.Id, usedGroupIds);
             group.Name = EnsureUniqueGroupName(group.Name, usedGroupNames);
-            group.DisplayOrder = index;
         }
 
         var knownGroupIds = settings.Groups
@@ -292,7 +341,6 @@ internal static class RepositoryHistoryStore
                             knownGroupIds.Contains(entry.GroupId)
                 ? entry.GroupId
                 : null;
-            entry.DisplayOrder = normalizedEntries.Count;
             normalizedEntries.Add(entry);
         }
 
@@ -335,7 +383,7 @@ internal static class RepositoryHistoryStore
     {
         if (migrated && skippedEntries == 0)
         {
-            return "已将旧版仓库列表迁移为未分组配置。";
+            return "已将旧版仓库列表完整迁移到默认页，原分组和条目保持不变。";
         }
 
         if (skippedEntries == 0)
@@ -344,7 +392,7 @@ internal static class RepositoryHistoryStore
         }
 
         var prefix = migrated
-            ? "旧版仓库列表已迁移，"
+            ? "旧版仓库列表已迁移到默认页，"
             : "仓库历史配置中有";
         return $"{prefix}已跳过 {skippedEntries} 个无效项。";
     }

@@ -4,13 +4,50 @@ namespace TortoiseGitLauncher;
 
 internal sealed class RepositoryHistorySettings
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public int Version { get; set; } = CurrentVersion;
+
+    public List<RepositoryDirectoryPage> Pages { get; set; } = [new()];
+    public string LastSelectedPageId { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public string? SaveBlockedReason { get; set; }
+
+    [JsonIgnore]
+    public RepositoryDirectoryPage ActivePage => DirectoryPageCollection.GetActive(Pages, LastSelectedPageId);
+
+    // Compatibility views for the current UI. Only Pages is serialized.
+    [JsonIgnore]
+    public List<RepositoryGroup> Groups { get => ActivePage.Groups; set => ActivePage.Groups = value; }
+
+    [JsonIgnore]
+    public List<RepositoryEntry> Entries { get => ActivePage.Entries; set => ActivePage.Entries = value; }
+
+    public RepositoryHistorySettings Clone() => new()
+    {
+        Version = Version,
+        Pages = Pages.Select(page => page.Clone()).ToList(),
+        LastSelectedPageId = LastSelectedPageId,
+        SaveBlockedReason = SaveBlockedReason
+    };
+}
+
+internal sealed class RepositoryDirectoryPage : DirectoryPage
+{
+    public RepositoryDirectoryPage() { }
 
     public List<RepositoryGroup> Groups { get; set; } = [];
 
     public List<RepositoryEntry> Entries { get; set; } = [];
+
+    public RepositoryDirectoryPage Clone() => new()
+    {
+        Id = Id, Name = Name, DisplayOrder = DisplayOrder,
+        LastSelectedDirectoryPath = LastSelectedDirectoryPath,
+        Groups = Groups.Select(group => group.Clone()).ToList(),
+        Entries = Entries.Select(entry => entry.Clone()).ToList()
+    };
 }
 
 internal sealed class RepositoryGroup
