@@ -116,4 +116,33 @@ var missingPages = RepositoryHistoryStore.Parse("{\"Version\":3}", out _);
 Check(missingPages.SaveBlockedReason is not null, "new schema missing pages cannot be overwritten");
 var bytes = File.ReadAllBytes(executionPath);
 Check(!(bytes.Length >= 3 && bytes[0] == 239 && bytes[1] == 187 && bytes[2] == 191), "saved JSON UTF-8 without BOM");
+// UI selection policy must not resurrect an explicitly removed configuration item.
+var usablePath = Path.Combine(root, "available");
+var removedPath = Path.Combine(root, "removed-but-still-on-disk");
+Directory.CreateDirectory(usablePath);
+Directory.CreateDirectory(removedPath);
+var usable = new RepositoryEntry { RepoRootPath = usablePath };
+var unavailable = new RepositoryEntry { RepoRootPath = Path.Combine(root, "missing") };
+Check(DirectoryPageSelection.Restore(removedPath, new[] { unavailable, usable }, entry => entry.RepoRootPath) == usable,
+    "removed remembered path falls back inside current page without upsert");
+Check(DirectoryPageSelection.Restore(removedPath, Array.Empty<RepositoryEntry>(), entry => entry.RepoRootPath) is null,
+    "empty page stays empty even when remembered directory exists");
+Check(DirectoryPageSelection.Restore(unavailable.RepoRootPath, new[] { unavailable }, entry => entry.RepoRootPath) is null,
+    "unavailable directory has no active selection but configuration is retained");
+Check(repos.AllowInitialDirectoryFallback && scripts.AllowInitialDirectoryFallback &&
+      !reloadedRepos.AllowInitialDirectoryFallback && !reloadedScripts.AllowInitialDirectoryFallback,
+    "startup fallback only applies to first initialization or legacy migration");
+Check(!reloadedRepos.Clone().AllowInitialDirectoryFallback && !reloadedScripts.Clone().AllowInitialDirectoryFallback,
+    "working copies preserve startup fallback policy");
+var isolated = reloadedRepos.Clone();
+isolated.Pages[0].Name = "编辑副本";
+isolated.Pages[0].Entries.Clear();
+Check(reloadedRepos.Pages[0].Name != "编辑副本" && reloadedRepos.Pages[0].Entries.Count == 32,
+    "cancelled page manager edits cannot mutate original page contents");
+var executionCopy = reloadedScripts.Clone();
+executionCopy.Pages.Clear();
+executionCopy.Pages.Add(new ExecutionDirectoryPage { Name = "空页" });
+executionCopy.LastSelectedPageId = executionCopy.Pages[0].Id;
+Check(executionCopy.RecentDirectories.Count == 0 && executionCopy.Scripts.Count == 1 &&
+      reloadedScripts.Pages.Count == 2, "new execution page empty, global scripts and original pages preserved");
 Console.WriteLine($"{passed} checks passed. Fixtures: {root}");

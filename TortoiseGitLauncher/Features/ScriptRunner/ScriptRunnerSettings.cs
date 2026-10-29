@@ -15,6 +15,9 @@ internal sealed class ScriptRunnerSettings
     public string? SaveBlockedReason { get; set; }
 
     [JsonIgnore]
+    public bool AllowInitialDirectoryFallback { get; set; } = true;
+
+    [JsonIgnore]
     public ExecutionDirectoryPage ActivePage => DirectoryPageCollection.GetActive(Pages, LastSelectedPageId);
 
     [JsonIgnore]
@@ -38,7 +41,8 @@ internal sealed class ScriptRunnerSettings
         Pages = Pages.Select(page => page.Clone()).ToList(),
         LastSelectedPageId = LastSelectedPageId,
         Scripts = Scripts.Select(script => script.Clone()).ToList(),
-        SaveBlockedReason = SaveBlockedReason
+        SaveBlockedReason = SaveBlockedReason,
+        AllowInitialDirectoryFallback = AllowInitialDirectoryFallback
     };
 }
 

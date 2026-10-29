@@ -16,17 +16,20 @@ internal sealed class RepositoryListManagerForm : Form
     private bool _isUpdatingSelection;
     private bool _isUpdatingEditor;
     private Point _dragStartPoint;
+    private readonly Func<RepositoryListManagerForm, string?>? _save;
 
     public string? SelectedRepoRootPath { get; private set; }
 
     public RepositoryListManagerForm(
         IEnumerable<RepositoryEntry> entries,
         IEnumerable<RepositoryGroup> groups,
-        string? selectedRepoRootPath)
+        string? selectedRepoRootPath,
+        Func<RepositoryListManagerForm, string?>? save = null)
     {
         _entries = entries.Select(entry => entry.Clone()).ToList();
         _groups = groups.Select(group => group.Clone()).ToList();
         SelectedRepoRootPath = selectedRepoRootPath;
+        _save = save;
 
         Text = "管理仓库列表";
         StartPosition = FormStartPosition.CenterParent;
@@ -498,6 +501,11 @@ internal sealed class RepositoryListManagerForm : Form
         }
         NormalizeOrders();
         SelectedRepoRootPath = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().Select(row => row.Entry?.RepoRootPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.RepoRootPath;
+        if (_save?.Invoke(this) is { } error)
+        {
+            MessageBox.Show(this, error, "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         DialogResult = DialogResult.OK;
         Close();
     }

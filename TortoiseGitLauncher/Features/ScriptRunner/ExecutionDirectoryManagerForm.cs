@@ -17,17 +17,20 @@ internal sealed class ExecutionDirectoryManagerForm : Form
     private bool _isUpdatingSelection;
     private bool _isUpdatingEditor;
     private Point _dragStartPoint;
+    private readonly Func<ExecutionDirectoryManagerForm, string?>? _save;
 
     public string? SelectedDirectoryPath { get; private set; }
 
     public ExecutionDirectoryManagerForm(
         IEnumerable<ExecutionDirectoryEntry> entries,
         IEnumerable<ExecutionDirectoryGroup> groups,
-        string? selectedDirectoryPath)
+        string? selectedDirectoryPath,
+        Func<ExecutionDirectoryManagerForm, string?>? save = null)
     {
         _entries = entries.Select(entry => entry.Clone()).ToList();
         _groups = groups.Select(group => group.Clone()).ToList();
         SelectedDirectoryPath = selectedDirectoryPath;
+        _save = save;
 
         Text = "管理执行目录";
         StartPosition = FormStartPosition.CenterParent;
@@ -454,6 +457,11 @@ internal sealed class ExecutionDirectoryManagerForm : Form
         }
         NormalizeOrders();
         SelectedDirectoryPath = _entriesListBox.SelectedItems.Cast<ManagerRow>().Select(row => row.Entry?.DirectoryPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.DirectoryPath;
+        if (_save?.Invoke(this) is { } error)
+        {
+            MessageBox.Show(this, error, "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         DialogResult = DialogResult.OK;
         Close();
     }

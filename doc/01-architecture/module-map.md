@@ -14,16 +14,20 @@ TortoiseGitLauncher/
       ScriptProcessRunner.cs
       ScriptRunInstance.cs
       ScriptRunnerPage.cs
+      ScriptRunnerPage.DirectoryPages.cs
       ScriptRunnerPathHelper.cs
       ScriptRunnerSettings.cs
       ScriptRunnerStore.cs
   UI/
     MainForm.cs
     MainForm.RepositoryManagement.cs
+    MainForm.DirectoryPages.cs
+    DirectoryPageManagerForm.cs
     RepositoryListManagerForm.cs
     Controls/
       CardPanel.cs
       RepositoryDetailsControl.cs
+      DirectoryPageSelectorButton.cs
     Icons/
       IconFactory.cs
   Models/
@@ -33,6 +37,7 @@ TortoiseGitLauncher/
   Services/
     RepositoryHistoryStore.cs
     SafeConfigurationFile.cs
+    DirectoryPageSelection.cs
     TortoiseGitLocator.cs
     GitPathHelper.cs
     RepositoryBranchReader.cs
@@ -48,6 +53,10 @@ TortoiseGitLauncher/
 | `UI/MainForm.cs` | 应用外壳、导航和页面装配 |
 | `UI/MainForm.RepositoryManagement.cs` | 仓库管理页及 TortoiseGit 命令交互 |
 | `UI/RepositoryListManagerForm.cs` | 仓库列表编辑对话框 |
+| `UI/MainForm.DirectoryPages.cs` | 仓库目录页切换、页管理与保存成功后替换状态 |
+| `UI/DirectoryPageManagerForm.cs` | 两模块共享的页管理编辑副本、名称校验、排序与删除确认 |
+| `UI/Controls/DirectoryPageSelectorButton.cs` | 标题切页菜单、当前页标记与管理入口 |
+| `Services/DirectoryPageSelection.cs` | 仅从本页现有可用条目恢复选择，避免删除项复活 |
 | `UI/Controls` | 可复用自绘控件 |
 | `UI/Controls/RepositoryDetailsControl.cs` | 仓库目录、分支、最新提交时间和备注展示；可见时后台轮询、过期结果隔离与生命周期清理 |
 | `UI/Icons` | 内置矢量图标枚举和绘制 |
@@ -62,6 +71,7 @@ TortoiseGitLauncher/
 脚本执行按功能纵向组织在 `Features/ScriptRunner/`：
 
 - `ScriptRunnerPage`：页面状态、目录与脚本入口、实例标签页和用户操作。
+- `ScriptRunnerPage.DirectoryPages.cs`：执行目录页切换、页管理和保存副本；复用页面及进程运行器，保持运行实例独立。
 - `ExecutionDirectoryManagerForm`：最近执行目录的重命名、排序和删除。
 - `ScriptConfigurationForm`、`ScriptConfigurationManagerForm`：脚本配置创建、编辑、排序和删除。
 - `ScriptRunnerSettings`、`ScriptRunnerStore`：版本化配置模型、兼容读取和安全保存。

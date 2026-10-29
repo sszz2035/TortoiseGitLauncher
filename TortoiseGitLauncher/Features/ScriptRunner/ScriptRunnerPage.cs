@@ -5,11 +5,13 @@ using System.Windows.Forms;
 
 namespace TortoiseGitLauncher;
 
-internal sealed class ScriptRunnerPage : UserControl
+internal sealed partial class ScriptRunnerPage : UserControl
 {
     private readonly string _launchDirectory;
     private readonly ScriptRunnerSettings _settings;
     private ComboBox _directoryComboBox = null!;
+    private DirectoryPageSelectorButton _directoryPageSelector = null!;
+    private Button _openExecutionDirectoryButton = null!;
     private Label _selectedDirectoryValue = null!;
     private Label _directoryStatusLabel = null!;
     private ExecutionDirectoryEntry? _selectedDirectory;
@@ -142,11 +144,16 @@ internal sealed class ScriptRunnerPage : UserControl
         openDirectoryButton.Padding = new Padding(9, 4, 9, 4);
         openDirectoryButton.Margin = new Padding(14, 0, 0, 0);
         openDirectoryButton.Click += (_, _) => OpenExecutionDirectoryInExplorer();
+        _openExecutionDirectoryButton = openDirectoryButton;
+        _directoryPageSelector = new DirectoryPageSelectorButton("执行目录");
+        _directoryPageSelector.SetPages(_settings.Pages, _settings.ActivePage.Id);
+        _directoryPageSelector.PageSelected += SwitchExecutionDirectoryPage;
+        _directoryPageSelector.ManagePagesRequested += (_, _) => OpenExecutionPageManager();
         layout.Controls.Add(CreateSectionTitle(
             "执行目录",
             UiIconKind.RepoFolder,
             Color.FromArgb(59, 130, 246),
-            openDirectoryButton), 0, 0);
+            openDirectoryButton, _directoryPageSelector), 0, 0);
 
         var selectionRow = new TableLayoutPanel
         {
@@ -190,7 +197,8 @@ internal sealed class ScriptRunnerPage : UserControl
                     ? entry.DisplayLabel
                     : $"{entry.DisplayLabel}（不可用）";
             }
-        };        _directoryComboBox.SelectedIndexChanged += (_, _) => SelectDirectoryFromComboBox();
+        };
+        _directoryComboBox.SelectedIndexChanged += (_, _) => SelectDirectoryFromComboBox();
         selectionRow.Controls.Add(_directoryComboBox, 0, 0);
 
         var browseButton = CreateActionButton(
@@ -599,30 +607,23 @@ internal sealed class ScriptRunnerPage : UserControl
     }
     private void InitializeDirectorySelection(string? initialRepositoryRootPath, bool persistSelection)
     {
-        ExecutionDirectoryEntry? entry = null;
-        var statusMessage = string.Empty;
+        var entry = DirectoryPageSelection.Restore(_settings.LastSelectedDirectoryPath,
+            _settings.RecentDirectories, item => item.DirectoryPath);
+        var statusMessage = entry is null
+            ? "当前目录页没有可用的执行目录，请先选择一个目录。"
+            : "已恢复当前目录页的执行目录。";
 
-        if (TryGetAvailablePath(_settings.LastSelectedDirectoryPath, out var lastSelectedPath))
-        {
-            entry = UpsertDirectory(lastSelectedPath, displayName: null, moveToTop: false);
-            statusMessage = "已恢复上次使用的执行目录。";
-        }
-        else if (TryGetAvailablePath(initialRepositoryRootPath, out var repositoryRootPath))
+        if (entry is null && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
+            TryGetAvailablePath(initialRepositoryRootPath, out var repositoryRootPath))
         {
             entry = UpsertDirectory(repositoryRootPath, displayName: null, moveToTop: true);
             statusMessage = "已使用当前仓库根目录作为初始执行目录。";
         }
-        else if (TryGetAvailablePath(_launchDirectory, out var launchDirectory))
+        else if (entry is null && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
+                 TryGetAvailablePath(_launchDirectory, out var launchDirectory))
         {
             entry = UpsertDirectory(launchDirectory, displayName: null, moveToTop: true);
             statusMessage = "已使用程序启动目录作为初始执行目录。";
-        }
-        else
-        {
-            entry = _settings.RecentDirectories.FirstOrDefault(item => Directory.Exists(item.DirectoryPath));
-            statusMessage = entry is null
-                ? "没有可用的执行目录，请先选择一个目录。"
-                : "已选择最近目录列表中的可用目录。";
         }
 
         if (entry is null)
@@ -670,43 +671,16 @@ internal sealed class ScriptRunnerPage : UserControl
         using var dialog = new ExecutionDirectoryManagerForm(
             _settings.RecentDirectories,
             _settings.DirectoryGroups,
-            _selectedDirectory?.DirectoryPath);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
-        }
-
-        _settings.RecentDirectories.Clear();
-        _settings.RecentDirectories.AddRange(dialog.GetEntries());
-        _settings.DirectoryGroups.Clear();
-        _settings.DirectoryGroups.AddRange(dialog.GetGroups());
-
-        var selectedEntry = string.IsNullOrWhiteSpace(dialog.SelectedDirectoryPath)
-            ? null
-            : FindDirectoryEntry(dialog.SelectedDirectoryPath);
-        if (selectedEntry is not null)
-        {
-            SelectDirectoryEntry(
-                selectedEntry,
-                "已更新执行目录列表。",
-                moveToTop: false,
-                saveImmediately: true);
-        }
-        else if (_settings.RecentDirectories.Count > 0)
-        {
-            SelectDirectoryEntry(
-                _settings.RecentDirectories[0],
-                "已更新执行目录列表。",
-                moveToTop: false,
-                saveImmediately: true);
-        }
-        else
-        {
-            ClearSelectedDirectory(
-                "执行目录列表已清空，请重新选择目录。",
-                isError: true,
-                saveImmediately: true);
-        }
+            _selectedDirectory?.DirectoryPath, editor =>
+            {
+                var pages = _settings.Pages.Select(page => page.Clone()).ToList();
+                var page = DirectoryPageCollection.GetActive(pages, _settings.LastSelectedPageId);
+                page.RecentDirectories = editor.GetEntries();
+                page.DirectoryGroups = editor.GetGroups();
+                page.LastSelectedDirectoryPath = editor.SelectedDirectoryPath ?? string.Empty;
+                return ApplyExecutionDirectoryPages(pages, page.Id);
+            });
+        dialog.ShowDialog(this);
     }
 
     private void SelectDirectoryFromComboBox()
@@ -719,11 +693,12 @@ internal sealed class ScriptRunnerPage : UserControl
         if (_directoryComboBox.SelectedItem is ExecutionDirectoryGroupComboItem groupItem)
         {
             groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
-            PersistSettings();
+            if (!PersistSettings()) groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
             var selectedPath = _selectedDirectory?.DirectoryPath;
+            var pageId = _settings.ActivePage.Id;
             BeginInvoke((Action)(() =>
             {
-                if (IsDisposed || Disposing)
+                if (IsDisposed || Disposing || _settings.ActivePage.Id != pageId)
                 {
                     return;
                 }
@@ -772,6 +747,7 @@ internal sealed class ScriptRunnerPage : UserControl
         _selectedDirectory = FindDirectoryEntry(entry.DirectoryPath) ?? entry;
         _settings.LastSelectedDirectoryPath = _selectedDirectory.DirectoryPath;
         _selectedDirectoryValue.Text = _selectedDirectory.DirectoryPath;
+        _openExecutionDirectoryButton.Enabled = Directory.Exists(_selectedDirectory.DirectoryPath);
         RefreshDirectoryComboBox(_selectedDirectory.DirectoryPath);
         RefreshScriptConfigurationSummary();
 
@@ -793,6 +769,7 @@ internal sealed class ScriptRunnerPage : UserControl
         _selectedDirectory = null;
         _settings.LastSelectedDirectoryPath = string.Empty;
         _selectedDirectoryValue.Text = "未选择执行目录";
+        _openExecutionDirectoryButton.Enabled = false;
         RefreshDirectoryComboBox(selectedDirectoryPath: null);
         RefreshScriptConfigurationSummary();
 
@@ -1686,7 +1663,8 @@ internal sealed class ScriptRunnerPage : UserControl
         string title,
         UiIconKind iconKind,
         Color accentColor,
-        Control? actionControl = null)
+        Control? actionControl = null,
+        Control? titleControl = null)
     {
         var titleRow = new TableLayoutPanel
         {
@@ -1715,7 +1693,7 @@ internal sealed class ScriptRunnerPage : UserControl
             BackColor = Color.Transparent,
             Margin = new Padding(0)
         }, 0, 0);
-        titleRow.Controls.Add(new Label
+        titleRow.Controls.Add(titleControl ?? new Label
         {
             Text = title,
             AutoSize = true,

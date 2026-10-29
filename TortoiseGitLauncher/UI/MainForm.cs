@@ -15,10 +15,13 @@ internal sealed partial class MainForm : Form
     private readonly System.Windows.Forms.Timer _repositoryNotesSaveTimer = new() { Interval = 500 };
     private bool _repositoryNotesDirty;
     private ComboBox _repoRootComboBox = null!;
+    private DirectoryPageSelectorButton _repositoryPageSelector = null!;
+    private Button _openRepositoryRootButton = null!;
+    private readonly List<Button> _repositoryCommandButtons = [];
     private Label _statusValue = null!;
     private readonly string _launchDirectory;
     private readonly RepositoryHistorySettings _repositorySettings;
-    private readonly List<RepositoryEntry> _repositoryEntries;
+    private List<RepositoryEntry> _repositoryEntries => _repositorySettings.Entries;
     private string _selectedDirectory;
     private RepositoryEntry? _selectedRepository;
     private bool _isUpdatingRepoComboBox;
@@ -54,7 +57,6 @@ internal sealed partial class MainForm : Form
         _launchDirectory = Environment.CurrentDirectory;
         _selectedDirectory = _launchDirectory;
         _repositorySettings = RepositoryHistoryStore.LoadSettings(out var repositoryLoadWarning);
-        _repositoryEntries = _repositorySettings.Entries;
 
         var detectedRepoRoot = GitPathHelper.FindRepositoryRoot(_launchDirectory);
         RepositoryEntry? initialSelection = null;
@@ -62,7 +64,8 @@ internal sealed partial class MainForm : Form
         var initialStatusIsError = false;
         var saveLoadedEntries = false;
 
-        if (detectedRepoRoot is not null)
+        if (_repositorySettings.AllowInitialDirectoryFallback &&
+            _repositorySettings.SaveBlockedReason is null && detectedRepoRoot is not null)
         {
             initialSelection = FindRepositoryEntryByPath(detectedRepoRoot);
             if (initialSelection is null)
@@ -75,9 +78,10 @@ internal sealed partial class MainForm : Form
                 ? "已自动定位到当前仓库根目录。"
                 : repositoryLoadWarning;
         }
-        else if (_repositoryEntries.Count > 0)
+        else if (DirectoryPageSelection.Restore(_repositorySettings.ActivePage.LastSelectedDirectoryPath,
+                     _repositoryEntries, entry => entry.RepoRootPath) is { } rememberedEntry)
         {
-            initialSelection = _repositoryEntries[0];
+            initialSelection = rememberedEntry;
             initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
                 ? "已载入最近使用的仓库根目录。"
                 : repositoryLoadWarning;
@@ -117,11 +121,8 @@ internal sealed partial class MainForm : Form
 
         if (initialSelection is not null)
         {
-            SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false, saveImmediately: false);
-            if (saveLoadedEntries)
-            {
-                RepositoryHistoryStore.Save(_repositorySettings);
-            }
+            SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false,
+                saveImmediately: saveLoadedEntries || _repositorySettings.SaveBlockedReason is null);
         }
         else
         {

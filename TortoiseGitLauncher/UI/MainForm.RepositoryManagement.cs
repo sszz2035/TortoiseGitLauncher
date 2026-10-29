@@ -82,13 +82,11 @@ internal sealed partial class MainForm : Form
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         titleRow.Controls.Add(CreateSmallIcon(UiIconKind.RepoFolder, Color.FromArgb(46, 118, 255), 18), 0, 0);
-        titleRow.Controls.Add(new Label
-        {
-            Text = "仓库根目录",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 11.5F, FontStyle.Bold, GraphicsUnit.Point),
-            Margin = new Padding(8, 0, 0, 0)
-        }, 1, 0);
+        _repositoryPageSelector = new DirectoryPageSelectorButton("仓库根目录");
+        _repositoryPageSelector.SetPages(_repositorySettings.Pages, _repositorySettings.ActivePage.Id);
+        _repositoryPageSelector.PageSelected += SwitchRepositoryDirectoryPage;
+        _repositoryPageSelector.ManagePagesRequested += (_, _) => OpenRepositoryPageManager();
+        titleRow.Controls.Add(_repositoryPageSelector, 1, 0);
         var openRepositoryRootButton = CreateHeaderButton("打开根目录", Color.FromArgb(243, 247, 255));
         openRepositoryRootButton.MinimumSize = new Size(128, 34);
         openRepositoryRootButton.Padding = new Padding(9, 4, 9, 4);
@@ -98,6 +96,7 @@ internal sealed partial class MainForm : Form
         openRepositoryRootButton.ImageAlign = ContentAlignment.MiddleLeft;
         openRepositoryRootButton.TextAlign = ContentAlignment.MiddleCenter;
         openRepositoryRootButton.Click += (_, _) => OpenRepositoryRootInExplorer();
+        _openRepositoryRootButton = openRepositoryRootButton;
         titleRow.Controls.Add(openRepositoryRootButton, 2, 0);
 
         layout.Controls.Add(titleRow, 0, 0);
@@ -133,7 +132,8 @@ internal sealed partial class MainForm : Form
             }
             else if (eventArgs.ListItem is RepositoryEntryComboItem entryItem)
             {
-                eventArgs.Value = entryItem.ToString();
+                var label = entryItem.ToString();
+                eventArgs.Value = Directory.Exists(entryItem.Entry.RepoRootPath) ? label : $"{label}（不可用）";
             }
         };
         _repoRootComboBox.SelectedIndexChanged += (_, _) => SelectRepoRootFromComboBox();
@@ -398,6 +398,7 @@ internal sealed partial class MainForm : Form
             : Color.FromArgb(207, 232, 202);
         button.FlatAppearance.BorderSize = 1;
         button.Click += (_, _) => ExecuteTortoiseGitCommand(command);
+        _repositoryCommandButtons.Add(button);
         return button;
     }
 
@@ -515,33 +516,17 @@ internal sealed partial class MainForm : Form
             return;
         }
 
-        using var dialog = new RepositoryListManagerForm(_repositoryEntries, _repositorySettings.Groups, _selectedRepository?.RepoRootPath);
-        if (dialog.ShowDialog(this) != DialogResult.OK)
-        {
-            return;
-        }
-
-        _repositoryEntries.Clear();
-        _repositoryEntries.AddRange(dialog.GetEntries());
-        _repositorySettings.Groups.Clear();
-        _repositorySettings.Groups.AddRange(dialog.GetGroups());
-        RepositoryHistoryStore.Save(_repositorySettings);
-
-        var selectedPath = dialog.SelectedRepoRootPath;
-        var selectedEntry = selectedPath is null ? null : FindRepositoryEntryByPath(selectedPath);
-        if (selectedEntry is not null)
-        {
-            SelectRepositoryEntry(selectedEntry, "已更新仓库列表。", moveToTop: false, saveImmediately: false);
-        }
-        else if (_repositoryEntries.Count > 0)
-        {
-            SelectRepositoryEntry(_repositoryEntries[0], "已更新仓库列表。", moveToTop: false, saveImmediately: false);
-        }
-        else
-        {
-            ClearSelectedRepository("仓库列表已清空。请先重新添加一个仓库目录。", isError: true);
-            RefreshRepoRootComboBox(selectedRepoRootPath: null);
-        }
+        using var dialog = new RepositoryListManagerForm(_repositoryEntries, _repositorySettings.Groups,
+            _selectedRepository?.RepoRootPath, editor =>
+            {
+                var pages = _repositorySettings.Pages.Select(page => page.Clone()).ToList();
+                var page = DirectoryPageCollection.GetActive(pages, _repositorySettings.LastSelectedPageId);
+                page.Entries = editor.GetEntries();
+                page.Groups = editor.GetGroups();
+                page.LastSelectedDirectoryPath = editor.SelectedRepoRootPath ?? string.Empty;
+                return ApplyRepositoryDirectoryPages(pages, page.Id);
+            });
+        dialog.ShowDialog(this);
     }
 
     private void SelectRepoRootFromComboBox()
@@ -554,11 +539,17 @@ internal sealed partial class MainForm : Form
         if (_repoRootComboBox.SelectedItem is RepositoryGroupComboItem groupItem)
         {
             groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
-            RepositoryHistoryStore.Save(_repositorySettings);
+            var saved = RepositoryHistoryStore.TrySave(_repositorySettings, out var errorMessage);
+            if (!saved)
+            {
+                groupItem.Group.IsExpanded = !groupItem.Group.IsExpanded;
+                SetStatus($"保存分组展开状态失败：{errorMessage}", isError: true);
+            }
             var selectedPath = _selectedRepository?.RepoRootPath;
+            var pageId = _repositorySettings.ActivePage.Id;
             BeginInvoke((Action)(() =>
             {
-                if (IsDisposed || Disposing)
+                if (IsDisposed || Disposing || _repositorySettings.ActivePage.Id != pageId)
                 {
                     return;
                 }
@@ -571,7 +562,7 @@ internal sealed partial class MainForm : Form
 
         if (TryGetRepositoryComboEntry(_repoRootComboBox.SelectedItem, out var entry))
         {
-            SelectRepositoryEntry(entry, "已从下拉框切换仓库根目录。", moveToTop: false, saveImmediately: false);
+            SelectRepositoryEntry(entry, "已从下拉框切换仓库根目录。", moveToTop: false, saveImmediately: true);
         }
     }
     private void SelectRepositoryEntry(RepositoryEntry entry, string statusMessage, bool moveToTop, bool saveImmediately)
@@ -589,12 +580,15 @@ internal sealed partial class MainForm : Form
 
         _selectedRepository = FindRepositoryEntryByPath(entry.RepoRootPath) ?? entry;
         _selectedDirectory = _selectedRepository.RepoRootPath;
+        _repositorySettings.ActivePage.LastSelectedDirectoryPath = _selectedDirectory;
         _repositoryDetails.SetRepository(_selectedDirectory, _selectedRepository.Notes);
         RefreshRepoRootComboBox(_selectedRepository.RepoRootPath);
+        UpdateRepositoryActionState();
 
-        if (saveImmediately)
+        if (saveImmediately && !RepositoryHistoryStore.TrySave(_repositorySettings, out var errorMessage))
         {
-            RepositoryHistoryStore.Save(_repositorySettings);
+            SetStatus($"保存当前仓库选择失败：{errorMessage}", isError: true);
+            return;
         }
 
         SetStatus($"{statusMessage} 当前仓库根目录: {_selectedRepository.RepoRootPath}", isError: false);
@@ -602,10 +596,19 @@ internal sealed partial class MainForm : Form
     private void ClearSelectedRepository(string statusMessage, bool isError)
     {
         _selectedRepository = null;
-        _selectedDirectory = _launchDirectory;
+        _selectedDirectory = string.Empty;
+        _repositorySettings.ActivePage.LastSelectedDirectoryPath = string.Empty;
         _repositoryDetails.SetRepository(null, null);
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
+        UpdateRepositoryActionState();
         SetStatus(statusMessage, isError);
+    }
+
+    private void UpdateRepositoryActionState()
+    {
+        var available = _selectedRepository is not null && Directory.Exists(_selectedRepository.RepoRootPath);
+        _openRepositoryRootButton.Enabled = available;
+        foreach (var button in _repositoryCommandButtons) button.Enabled = available;
     }
 
     private bool SaveRepositoryNotes()

@@ -57,6 +57,7 @@ internal static class RepositoryHistoryStore
             {
                 if (root.TryGetProperty(nameof(RepositoryHistorySettings.Pages), out var pages))
                 {
+                    settings.AllowInitialDirectoryFallback = false;
                     if (pages.ValueKind != JsonValueKind.Array)
                         throw new InvalidDataException("目录页集合格式无效。");
                     settings.Pages.Clear();

@@ -49,6 +49,7 @@ internal static class ScriptRunnerStore
             var migrated = false;
             if (root.TryGetProperty(nameof(ScriptRunnerSettings.Pages), out var pages))
             {
+                settings.AllowInitialDirectoryFallback = false;
                 if (pages.ValueKind != JsonValueKind.Array)
                     throw new InvalidDataException("目录页集合格式无效。");
                 settings.Pages.Clear();

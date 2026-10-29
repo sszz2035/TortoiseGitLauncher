@@ -15,6 +15,9 @@ internal sealed class RepositoryHistorySettings
     public string? SaveBlockedReason { get; set; }
 
     [JsonIgnore]
+    public bool AllowInitialDirectoryFallback { get; set; } = true;
+
+    [JsonIgnore]
     public RepositoryDirectoryPage ActivePage => DirectoryPageCollection.GetActive(Pages, LastSelectedPageId);
 
     // Compatibility views for the current UI. Only Pages is serialized.
@@ -29,7 +32,8 @@ internal sealed class RepositoryHistorySettings
         Version = Version,
         Pages = Pages.Select(page => page.Clone()).ToList(),
         LastSelectedPageId = LastSelectedPageId,
-        SaveBlockedReason = SaveBlockedReason
+        SaveBlockedReason = SaveBlockedReason,
+        AllowInitialDirectoryFallback = AllowInitialDirectoryFallback
     };
 }
 
