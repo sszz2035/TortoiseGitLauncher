@@ -63,7 +63,7 @@ internal sealed class ExecutionDirectoryPage : DirectoryPage
     };
 }
 
-internal sealed class ExecutionDirectoryGroup
+internal sealed class ExecutionDirectoryGroup : IDirectoryTransferGroup<ExecutionDirectoryGroup>
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("D");
 
@@ -85,8 +85,10 @@ internal sealed class ExecutionDirectoryGroup
     public override string ToString() => Name;
 }
 
-internal sealed class ExecutionDirectoryEntry
+internal sealed class ExecutionDirectoryEntry : IDirectoryTransferEntry<ExecutionDirectoryEntry>
 {
+    string IDirectoryTransferEntry<ExecutionDirectoryEntry>.TransferPath => DirectoryPath;
+
     public string DisplayName { get; set; } = string.Empty;
 
     public string DirectoryPath { get; set; } = string.Empty;

@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../TortoiseGitLauncher/Models/DirectoryPage.cs" Link="DirectoryPage.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Models/DirectoryTransferContracts.cs" Link="DirectoryTransferContracts.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/DirectoryPageTransfer.cs" Link="DirectoryPageTransfer.cs" />
     <Compile Include="../../TortoiseGitLauncher/Services/DirectoryPageSelection.cs" Link="DirectoryPageSelection.cs" />
     <Compile Include="../../TortoiseGitLauncher/Models/RepositoryEntry.cs" Link="RepositoryEntry.cs" />
     <Compile Include="../../TortoiseGitLauncher/Services/RepositoryHistoryStore.cs" Link="RepositoryHistoryStore.cs" />

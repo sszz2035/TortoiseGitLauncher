@@ -673,13 +673,13 @@ internal sealed partial class ScriptRunnerPage : UserControl
             _settings.DirectoryGroups,
             _selectedDirectory?.DirectoryPath, editor =>
             {
-                var pages = _settings.Pages.Select(page => page.Clone()).ToList();
+                var pages = editor.GetPages();
                 var page = DirectoryPageCollection.GetActive(pages, _settings.LastSelectedPageId);
                 page.RecentDirectories = editor.GetEntries();
                 page.DirectoryGroups = editor.GetGroups();
                 page.LastSelectedDirectoryPath = editor.SelectedDirectoryPath ?? string.Empty;
                 return ApplyExecutionDirectoryPages(pages, page.Id);
-            });
+            }, _settings.Pages, _settings.ActivePage.Id);
         dialog.ShowDialog(this);
     }
 

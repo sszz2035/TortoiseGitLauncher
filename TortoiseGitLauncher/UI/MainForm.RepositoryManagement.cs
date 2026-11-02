@@ -519,13 +519,13 @@ internal sealed partial class MainForm : Form
         using var dialog = new RepositoryListManagerForm(_repositoryEntries, _repositorySettings.Groups,
             _selectedRepository?.RepoRootPath, editor =>
             {
-                var pages = _repositorySettings.Pages.Select(page => page.Clone()).ToList();
+                var pages = editor.GetPages();
                 var page = DirectoryPageCollection.GetActive(pages, _repositorySettings.LastSelectedPageId);
                 page.Entries = editor.GetEntries();
                 page.Groups = editor.GetGroups();
                 page.LastSelectedDirectoryPath = editor.SelectedRepoRootPath ?? string.Empty;
                 return ApplyRepositoryDirectoryPages(pages, page.Id);
-            });
+            }, _repositorySettings.Pages, _repositorySettings.ActivePage.Id);
         dialog.ShowDialog(this);
     }
 

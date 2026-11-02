@@ -54,7 +54,7 @@ internal sealed class RepositoryDirectoryPage : DirectoryPage
     };
 }
 
-internal sealed class RepositoryGroup
+internal sealed class RepositoryGroup : IDirectoryTransferGroup<RepositoryGroup>
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("D");
 
@@ -76,8 +76,10 @@ internal sealed class RepositoryGroup
     public override string ToString() => Name;
 }
 
-internal sealed class RepositoryEntry
+internal sealed class RepositoryEntry : IDirectoryTransferEntry<RepositoryEntry>
 {
+    string IDirectoryTransferEntry<RepositoryEntry>.TransferPath => RepoRootPath;
+
     public string DisplayName { get; set; } = string.Empty;
 
     public string RepoRootPath { get; set; } = string.Empty;

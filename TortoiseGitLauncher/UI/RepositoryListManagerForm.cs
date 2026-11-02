@@ -17,6 +17,8 @@ internal sealed class RepositoryListManagerForm : Form
     private bool _isUpdatingEditor;
     private Point _dragStartPoint;
     private readonly Func<RepositoryListManagerForm, string?>? _save;
+    private readonly List<RepositoryDirectoryPage>? _pageDrafts;
+    private readonly string? _sourcePageId;
 
     public string? SelectedRepoRootPath { get; private set; }
 
@@ -24,10 +26,15 @@ internal sealed class RepositoryListManagerForm : Form
         IEnumerable<RepositoryEntry> entries,
         IEnumerable<RepositoryGroup> groups,
         string? selectedRepoRootPath,
-        Func<RepositoryListManagerForm, string?>? save = null)
+        Func<RepositoryListManagerForm, string?>? save = null,
+        IEnumerable<RepositoryDirectoryPage>? pages = null,
+        string? sourcePageId = null)
     {
-        _entries = entries.Select(entry => entry.Clone()).ToList();
-        _groups = groups.Select(group => group.Clone()).ToList();
+        _pageDrafts = pages?.Select(page => page.Clone()).ToList();
+        _sourcePageId = sourcePageId;
+        var sourcePage = _pageDrafts?.Single(page => string.Equals(page.Id, sourcePageId, StringComparison.OrdinalIgnoreCase));
+        _entries = sourcePage?.Entries ?? entries.Select(entry => entry.Clone()).ToList();
+        _groups = sourcePage?.Groups ?? groups.Select(group => group.Clone()).ToList();
         SelectedRepoRootPath = selectedRepoRootPath;
         _save = save;
 
@@ -103,10 +110,16 @@ internal sealed class RepositoryListManagerForm : Form
         _entriesListBox.DoubleClick += (_, _) => ToggleSelectedGroup();
         leftPanel.Controls.Add(_entriesListBox, 0, 1);
 
-        var groupButtonsPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
+        var groupButtonsPanel = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0) };
         var createGroupButton = CreateDialogButton("新建分组", Color.FromArgb(242, 246, 240));
         createGroupButton.Click += (_, _) => CreateGroup();
         groupButtonsPanel.Controls.Add(createGroupButton);
+        var moveToButton = CreateDialogButton("移动到…", Color.FromArgb(233, 242, 255));
+        moveToButton.Click += (_, _) => TransferSelectedItems(move: true);
+        groupButtonsPanel.Controls.Add(moveToButton);
+        var copyToButton = CreateDialogButton("复制到…", Color.FromArgb(233, 242, 255));
+        copyToButton.Click += (_, _) => TransferSelectedItems(move: false);
+        groupButtonsPanel.Controls.Add(copyToButton);
         leftPanel.Controls.Add(groupButtonsPanel, 0, 2);
 
         var operationPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 0) };
@@ -162,6 +175,44 @@ internal sealed class RepositoryListManagerForm : Form
 
     public List<RepositoryEntry> GetEntries() => _entries.Select(entry => entry.Clone()).ToList();
     public List<RepositoryGroup> GetGroups() => _groups.Select(group => group.Clone()).ToList();
+    public List<RepositoryDirectoryPage> GetPages() => _pageDrafts?.Select(page => page.Clone()).ToList() ?? [];
+
+    private void TransferSelectedItems(bool move)
+    {
+        ApplyDisplayNameChanges();
+        RenameSelectedGroup();
+        var rows = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().ToList();
+        if (rows.Count == 0)
+        {
+            MessageBox.Show(this, "请先选择目录项或分组。", "选择要转移的内容", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var targets = _pageDrafts?.Where(page => !string.Equals(page.Id, _sourcePageId, StringComparison.OrdinalIgnoreCase)).ToList() ?? [];
+        if (targets.Count == 0)
+        {
+            MessageBox.Show(this, "请先通过目录标题中的“管理目录页”创建另一个目录页。", "没有目标目录页", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        using var chooser = new DirectoryTransferTargetForm("仓库管理", targets, move);
+        if (chooser.ShowDialog(this) != DialogResult.OK) return;
+        var target = targets.Single(page => page.Id == chooser.SelectedPageId);
+        try
+        {
+            var result = DirectoryPageTransfer.Transfer(_entries, _groups, target.Entries, target.Groups,
+                rows.Where(row => row.Entry is not null).Select(row => row.Entry!).ToList(),
+                rows.Where(row => row.Group is not null).Select(row => row.Group!).ToList(), move);
+            if (result.HasChanges)
+            {
+                if (move) RefreshEntriesList(null);
+                Text = "管理仓库列表 · 有未保存的修改";
+            }
+            DirectoryTransferFeedback.Show(this, result, move, target.Name);
+        }
+        catch (ArgumentException ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法转移", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
 
     private static Button CreateDialogButton(string text, Color backgroundColor)
     {
@@ -499,8 +550,13 @@ internal sealed class RepositoryListManagerForm : Form
                 return;
             }
         }
-        NormalizeOrders();
         SelectedRepoRootPath = _entriesListBox.SelectedItems.Cast<RepositoryManagerRow>().Select(row => row.Entry?.RepoRootPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.RepoRootPath;
+        foreach (var page in _pageDrafts ?? [])
+        {
+            if (DirectoryPageTransfer.Validate(page.Entries, page.Groups) is not { } validationError) continue;
+            MessageBox.Show(this, $"目录页“{page.Name}”：{validationError}", "无法保存", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         if (_save?.Invoke(this) is { } error)
         {
             MessageBox.Show(this, error, "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
