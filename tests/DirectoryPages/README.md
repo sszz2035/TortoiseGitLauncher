@@ -14,4 +14,6 @@ dotnet run --project tests/DirectoryPages/DirectoryPages.csproj
 
 样例配置全部写入系统临时目录 `TortoiseGitLauncher-tests-{GUID}`，结束时输出位置并保留供排查。测试不修改真实目录文件，不触发 Git 操作。
 
+任务 4 新增 RepositoryToScriptTransferTests.cs：仓库到执行目录映射、备注与失效路径、普通项顺序、折叠组、部分/全部重复、完整组与空组移动、取消隔离、目标保存失败、目标成功源失败、重试跳过目标、保存重载、全局脚本及当前页保留、双侧备份。测试源码已接入，尚未编译或运行；GUI 的模块切换、锁定编辑与部分提交关闭提示仍需验收。
+
 当前提交前状态：只做语法及引用路径静态检查，尚未编译或运行这些检查项。

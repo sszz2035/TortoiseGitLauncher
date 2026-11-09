@@ -146,4 +146,5 @@ executionCopy.LastSelectedPageId = executionCopy.Pages[0].Id;
 Check(executionCopy.RecentDirectories.Count == 0 && executionCopy.Scripts.Count == 1 &&
       reloadedScripts.Pages.Count == 2, "new execution page empty, global scripts and original pages preserved");
 DirectoryPageTransferTests.Run(Check, root);
+RepositoryToScriptTransferTests.Run(Check, root);
 Console.WriteLine($"{passed} checks passed. Fixtures: {root}");

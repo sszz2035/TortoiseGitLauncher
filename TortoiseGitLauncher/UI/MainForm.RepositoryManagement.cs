@@ -524,8 +524,11 @@ internal sealed partial class MainForm : Form
                 page.Entries = editor.GetEntries();
                 page.Groups = editor.GetGroups();
                 page.LastSelectedDirectoryPath = editor.SelectedRepoRootPath ?? string.Empty;
-                return ApplyRepositoryDirectoryPages(pages, page.Id);
-            }, _repositorySettings.Pages, _repositorySettings.ActivePage.Id);
+                if (!editor.HasExecutionChanges) return ApplyRepositoryDirectoryPages(pages, page.Id);
+                return editor.TransferSave.Save(
+                    () => _scriptRunnerPage.ApplyTransferredDirectoryPages(editor.GetExecutionPages()),
+                    () => ApplyRepositoryDirectoryPages(pages, page.Id));
+            }, _repositorySettings.Pages, _repositorySettings.ActivePage.Id, _scriptRunnerPage.CloneDirectoryPages());
         dialog.ShowDialog(this);
     }
 

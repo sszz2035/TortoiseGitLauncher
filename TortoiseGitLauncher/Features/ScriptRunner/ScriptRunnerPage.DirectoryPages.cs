@@ -4,6 +4,12 @@ namespace TortoiseGitLauncher;
 
 internal sealed partial class ScriptRunnerPage
 {
+    // Expose page snapshots and a save boundary, never the runner or global script drafts.
+    internal List<ExecutionDirectoryPage> CloneDirectoryPages() => _settings.Pages.Select(page => page.Clone()).ToList();
+
+    internal string? ApplyTransferredDirectoryPages(List<ExecutionDirectoryPage> pages) =>
+        ApplyExecutionDirectoryPages(pages, _settings.ActivePage.Id);
+
     private void SwitchExecutionDirectoryPage(string id)
     {
         if (string.Equals(id, _settings.ActivePage.Id, StringComparison.OrdinalIgnoreCase)) return;
