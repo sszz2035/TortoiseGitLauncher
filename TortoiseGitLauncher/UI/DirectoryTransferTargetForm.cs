@@ -29,6 +29,7 @@ internal sealed class DirectoryTransferTargetForm : Form
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(18)
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));

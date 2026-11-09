@@ -78,8 +78,8 @@ internal sealed class DirectoryPageManagerForm<TPage> : Form where TPage : Direc
             _name.Focus();
             _name.SelectAll();
         }));
-        _up = MakeButton("上移", (_, _) => Move(-1));
-        _down = MakeButton("下移", (_, _) => Move(1));
+        _up = MakeButton("上移", (_, _) => MoveSelectedPage(-1));
+        _down = MakeButton("下移", (_, _) => MoveSelectedPage(1));
         _delete = MakeButton("删除页", (_, _) => DeleteSelected());
         operations.Controls.AddRange([_up, _down, _delete]);
         root.Controls.Add(operations, 0, 2);
@@ -130,7 +130,7 @@ internal sealed class DirectoryPageManagerForm<TPage> : Form where TPage : Direc
         finally { _updating = false; }
     }
 
-    private void Move(int offset)
+    private void MoveSelectedPage(int offset)
     {
         var index = _list.SelectedIndex;
         var target = index + offset;

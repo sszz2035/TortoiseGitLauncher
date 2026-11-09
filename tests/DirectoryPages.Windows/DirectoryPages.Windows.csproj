@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../TortoiseGitLauncher/Models/DirectoryPage.cs" Link="Production/DirectoryPage.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Models/DirectoryTransferContracts.cs" Link="Production/DirectoryTransferContracts.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Models/RepositoryEntry.cs" Link="Production/RepositoryEntry.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/DirectoryPageTransfer.cs" Link="Production/DirectoryPageTransfer.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/DirectoryPageSelection.cs" Link="Production/DirectoryPageSelection.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/DirectoryTransferSave.cs" Link="Production/DirectoryTransferSave.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/RepositoryToScriptTransfer.cs" Link="Production/RepositoryToScriptTransfer.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/GitPathHelper.cs" Link="Production/GitPathHelper.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/SafeConfigurationFile.cs" Link="Production/SafeConfigurationFile.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/RepositoryHistoryStore.cs" Link="Production/RepositoryHistoryStore.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptRunnerStore.cs" Link="Production/ScriptRunnerStore.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptRunnerSettings.cs" Link="Production/ScriptRunnerSettings.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptRunnerPathHelper.cs" Link="Production/ScriptRunnerPathHelper.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptConfiguration.cs" Link="Production/ScriptConfiguration.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptProcessRunner.cs" Link="Production/ScriptProcessRunner.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ScriptRunInstance.cs" Link="Production/ScriptRunInstance.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ExecutionDirectoryManagerForm.cs" Link="Production/ExecutionDirectoryManagerForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/RepositoryListManagerForm.cs" Link="Production/RepositoryListManagerForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/DirectoryTransferTargetForm.cs" Link="Production/DirectoryTransferTargetForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/DirectoryTransferFeedback.cs" Link="Production/DirectoryTransferFeedback.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/DirectoryPageManagerForm.cs" Link="Production/DirectoryPageManagerForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/Controls/DirectoryPageSelectorButton.cs" Link="Production/DirectoryPageSelectorButton.cs" />
+  </ItemGroup>
+</Project>
