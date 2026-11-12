@@ -506,6 +506,7 @@ internal sealed class ExecutionDirectoryManagerForm : Form
                 return;
             }
         }
+        NormalizeOrders();
         SelectedDirectoryPath = _entriesListBox.SelectedItems.Cast<ManagerRow>().Select(row => row.Entry?.DirectoryPath).FirstOrDefault(path => path is not null) ?? _entries.FirstOrDefault()?.DirectoryPath;
         foreach (var page in _pageDrafts ?? [])
         {
