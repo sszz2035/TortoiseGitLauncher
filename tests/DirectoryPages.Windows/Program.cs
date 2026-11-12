@@ -33,6 +33,7 @@ internal static class Program
         Directory.CreateDirectory(Root);
         Console.WriteLine("Fixtures: " + Root);
         TestTargetChooser();
+        TestExplorerRequests();
         TestPageManager();
         TestListManagers();
         TestFailedWrites();
@@ -128,6 +129,54 @@ internal static class Program
         using var empty = new DirectoryTransferTargetForm("仓库管理", [], false);
         Check(empty.SelectedPageId is null && empty.AcceptButton is Button { Enabled: false },
             "empty target cannot confirm transfer");
+    }
+
+    private static void TestExplorerRequests()
+    {
+        var path = Path.Combine(Root, "中文 路径 & test");
+        Check(ExplorerAddRequest.TryParse(["--add-to-repositories", path], out var repoRequest) &&
+              repoRequest is { Target: ExplorerAddTarget.Repository } && repoRequest.Path == path,
+            "Explorer repository argument preserves spaces, Chinese and shell characters");
+        Check(ExplorerAddRequest.TryParse(["--add-to-script-directories", path + "\\."], out var scriptRequest) &&
+              scriptRequest is { Target: ExplorerAddTarget.ExecutionDirectory } && scriptRequest.Path == path,
+            "Explorer script argument normalizes the shell quoting suffix");
+        Check(ExplorerAddRequest.TryParse(["--add-to-script-directories", @"C:\\."], out var driveRequest) &&
+              driveRequest?.Path == @"C:\",
+            "Explorer drive-root argument keeps its root separator");
+        Check(!ExplorerAddRequest.TryParse([], out _) &&
+              !ExplorerAddRequest.TryParse(["--unknown", path], out _) &&
+              !ExplorerAddRequest.TryParse(["--add-to-repositories", "relative"], out _) &&
+              !ExplorerAddRequest.TryParse(["--add-to-repositories", path, "extra"], out _) &&
+              !ExplorerAddRequest.TryParse(["--add-to-repositories", " "], out _),
+            "Explorer rejects malformed, relative and unknown commands");
+        Check(scriptRequest is not null && ExplorerAddRequest.TryParse(scriptRequest.ToArguments(), out var roundtrip) &&
+              roundtrip == scriptRequest, "Explorer request argument roundtrip");
+
+        var first = new RepositoryDirectoryPage { Name = "第一页", DisplayOrder = 0 };
+        var last = new RepositoryDirectoryPage { Name = new string('长', 70), DisplayOrder = 1 };
+        using var chooser = new ExplorerDirectoryTargetForm("仓库管理", path, [last, first], last.Id);
+        Check(chooser.SelectedPageId == last.Id && Field<ComboBox>(chooser, "_pages").Items[0] == first,
+            "Explorer chooser defaults to remembered page and orders by display order");
+        Field<ComboBox>(chooser, "_pages").SelectedIndex = 0;
+        Check(chooser.SelectedPageId == first.Id && first.Entries.Count == 0 && last.Entries.Count == 0,
+            "Explorer chooser selection does not mutate page data");
+        Prepare(chooser);
+        chooser.Size = chooser.MinimumSize;
+        CheckButtonsVisible(chooser, "Explorer chooser minimum size");
+        chooser.Scale(new SizeF(1.5F, 1.5F));
+        CheckButtonsVisible(chooser, "Explorer chooser simulated 150% scale");
+        chooser.Scale(new SizeF(4F / 3F, 4F / 3F));
+        CheckButtonsVisible(chooser, "Explorer chooser simulated 200% scale");
+        ((Button)chooser.CancelButton!).PerformClick();
+        Check(chooser.DialogResult == DialogResult.Cancel && first.Entries.Count == 0 && last.Entries.Count == 0,
+            "Explorer chooser cancellation leaves page data unchanged");
+        var execution = new ExecutionDirectoryPage { Name = "脚本目录页" };
+        using var scripts = new ExplorerDirectoryTargetForm("脚本执行", path, [execution], execution.Id);
+        Check(scripts.SelectedPageId == execution.Id, "Explorer chooser supports independent script pages");
+        using var empty = new ExplorerDirectoryTargetForm("脚本执行", path, [], "missing");
+        Check(empty.SelectedPageId is null && empty.AcceptButton is Button { Enabled: false },
+            "Explorer chooser cannot confirm without a page");
+        // Deliberately do not register menus or use the live application's pipe in component tests.
     }
 
     private static void TestPageManager()

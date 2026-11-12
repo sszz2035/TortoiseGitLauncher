@@ -26,6 +26,8 @@
     <Compile Include="../../TortoiseGitLauncher/Features/ScriptRunner/ExecutionDirectoryManagerForm.cs" Link="Production/ExecutionDirectoryManagerForm.cs" />
     <Compile Include="../../TortoiseGitLauncher/UI/RepositoryListManagerForm.cs" Link="Production/RepositoryListManagerForm.cs" />
     <Compile Include="../../TortoiseGitLauncher/UI/DirectoryTransferTargetForm.cs" Link="Production/DirectoryTransferTargetForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/UI/ExplorerDirectoryTargetForm.cs" Link="Production/ExplorerDirectoryTargetForm.cs" />
+    <Compile Include="../../TortoiseGitLauncher/Services/ExplorerContextMenu.cs" Link="Production/ExplorerContextMenu.cs" />
     <Compile Include="../../TortoiseGitLauncher/UI/DirectoryTransferFeedback.cs" Link="Production/DirectoryTransferFeedback.cs" />
     <Compile Include="../../TortoiseGitLauncher/UI/DirectoryPageManagerForm.cs" Link="Production/DirectoryPageManagerForm.cs" />
     <Compile Include="../../TortoiseGitLauncher/UI/Controls/DirectoryPageSelectorButton.cs" Link="Production/DirectoryPageSelectorButton.cs" />

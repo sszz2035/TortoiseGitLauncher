@@ -41,7 +41,8 @@ internal sealed partial class ScriptRunnerPage : UserControl
     private long _renderedOutputFirstSequence;
     private long _renderedOutputLastSequence;
 
-    public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath)
+    public ScriptRunnerPage(string launchDirectory, string? initialRepositoryRootPath,
+        bool suppressInitialDirectoryFallback = false)
     {
         _launchDirectory = ScriptRunnerPathHelper.NormalizeDirectoryPath(launchDirectory);
         _settings = ScriptRunnerStore.Load(out var loadWarning);
@@ -79,7 +80,8 @@ internal sealed partial class ScriptRunnerPage : UserControl
         _runUiRefreshTimer.Tick += (_, _) => RefreshSelectedRunInstanceOutput(force: false);
         _runUiRefreshTimer.Start();
 
-        InitializeDirectorySelection(initialRepositoryRootPath, persistSelection: loadWarning is null);
+        InitializeDirectorySelection(initialRepositoryRootPath, persistSelection: loadWarning is null,
+            allowInitialDirectoryFallback: !suppressInitialDirectoryFallback);
         if (!string.IsNullOrWhiteSpace(loadWarning))
         {
             SetDirectoryStatus(loadWarning, isError: true);
@@ -88,6 +90,46 @@ internal sealed partial class ScriptRunnerPage : UserControl
 
     public int RunningInstanceCount =>
         _runInstances.Count(instance => instance.IsRunning);
+
+    internal bool AddDirectoryFromExplorer(string path, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        if (!Directory.Exists(path))
+        {
+            errorMessage = "所选执行目录不存在或不可访问。";
+            return false;
+        }
+
+        var normalizedPath = ScriptRunnerPathHelper.NormalizeDirectoryPath(path);
+        using var dialog = new ExplorerDirectoryTargetForm("脚本执行", normalizedPath,
+            _settings.Pages, _settings.ActivePage.Id);
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedPageId is null) return true;
+
+        var pages = CloneDirectoryPages();
+        var page = pages.Single(page => page.Id == dialog.SelectedPageId);
+        var entry = page.RecentDirectories.FirstOrDefault(item => string.Equals(
+            item.DirectoryPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            entry = new ExecutionDirectoryEntry
+            {
+                DirectoryPath = normalizedPath,
+                DisplayOrder = page.DirectoryGroups.Select(group => group.DisplayOrder)
+                    .Concat(page.RecentDirectories.Where(item => string.IsNullOrWhiteSpace(item.GroupId))
+                        .Select(item => item.DisplayOrder)).DefaultIfEmpty(-1).Max() + 1
+            };
+            page.RecentDirectories.Add(entry);
+        }
+        page.LastSelectedDirectoryPath = entry.DirectoryPath;
+        var error = ApplyExecutionDirectoryPages(pages, page.Id);
+        if (error is null)
+        {
+            SetDirectoryStatus("已从资源管理器添加并选中执行目录。", isError: false);
+            return true;
+        }
+        errorMessage = $"保存脚本执行配置失败，原配置未更改。{Environment.NewLine}{error}";
+        return false;
+    }
 
     public void StopAllRunningInstances()
     {
@@ -605,7 +647,8 @@ internal sealed partial class ScriptRunnerPage : UserControl
             ? Color.FromArgb(180, 45, 30)
             : Color.FromArgb(23, 112, 41);
     }
-    private void InitializeDirectorySelection(string? initialRepositoryRootPath, bool persistSelection)
+    private void InitializeDirectorySelection(string? initialRepositoryRootPath, bool persistSelection,
+        bool allowInitialDirectoryFallback = true)
     {
         var entry = DirectoryPageSelection.Restore(_settings.LastSelectedDirectoryPath,
             _settings.RecentDirectories, item => item.DirectoryPath);
@@ -613,13 +656,13 @@ internal sealed partial class ScriptRunnerPage : UserControl
             ? "当前目录页没有可用的执行目录，请先选择一个目录。"
             : "已恢复当前目录页的执行目录。";
 
-        if (entry is null && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
+        if (entry is null && allowInitialDirectoryFallback && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
             TryGetAvailablePath(initialRepositoryRootPath, out var repositoryRootPath))
         {
             entry = UpsertDirectory(repositoryRootPath, displayName: null, moveToTop: true);
             statusMessage = "已使用当前仓库根目录作为初始执行目录。";
         }
-        else if (entry is null && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
+        else if (entry is null && allowInitialDirectoryFallback && _settings.AllowInitialDirectoryFallback && _settings.SaveBlockedReason is null &&
                  TryGetAvailablePath(_launchDirectory, out var launchDirectory))
         {
             entry = UpsertDirectory(launchDirectory, displayName: null, moveToTop: true);
