@@ -15,10 +15,18 @@ internal sealed partial class MainForm : Form
     private readonly System.Windows.Forms.Timer _repositoryNotesSaveTimer = new() { Interval = 500 };
     private bool _repositoryNotesDirty;
     private ComboBox _repoRootComboBox = null!;
+    private DirectoryPageSelectorButton _repositoryPageSelector = null!;
+    private Button _openRepositoryRootButton = null!;
+    private readonly List<Button> _repositoryCommandButtons = [];
     private Label _statusValue = null!;
+    private LinkLabel _explorerMenuLink = null!;
+    private readonly ContextMenuStrip _explorerMenu = new();
+    private readonly Queue<ExplorerAddRequest> _explorerRequests = new();
+    private readonly System.Windows.Forms.Timer _explorerRequestTimer = new() { Interval = 250 };
+    private bool _handlingExplorerRequest;
     private readonly string _launchDirectory;
     private readonly RepositoryHistorySettings _repositorySettings;
-    private readonly List<RepositoryEntry> _repositoryEntries;
+    private List<RepositoryEntry> _repositoryEntries => _repositorySettings.Entries;
     private string _selectedDirectory;
     private RepositoryEntry? _selectedRepository;
     private bool _isUpdatingRepoComboBox;
@@ -49,12 +57,15 @@ internal sealed partial class MainForm : Form
         new("处理更改", Color.FromArgb(168, 85, 247), ["还原", "解决冲突", "获取", "贮藏", "弹出贮藏"])
     ];
 
-    public MainForm()
+    public MainForm(bool suppressInitialDirectoryFallback = false)
     {
+        string? contextMenuWarning = null;
+        try { if (!ExplorerContextMenu.IsDisabled) ExplorerContextMenu.Register(); }
+        catch (Exception ex) { contextMenuWarning = $"资源管理器右键菜单注册失败：{ex.Message}"; }
+
         _launchDirectory = Environment.CurrentDirectory;
         _selectedDirectory = _launchDirectory;
         _repositorySettings = RepositoryHistoryStore.LoadSettings(out var repositoryLoadWarning);
-        _repositoryEntries = _repositorySettings.Entries;
 
         var detectedRepoRoot = GitPathHelper.FindRepositoryRoot(_launchDirectory);
         RepositoryEntry? initialSelection = null;
@@ -62,7 +73,8 @@ internal sealed partial class MainForm : Form
         var initialStatusIsError = false;
         var saveLoadedEntries = false;
 
-        if (detectedRepoRoot is not null)
+        if (!suppressInitialDirectoryFallback && _repositorySettings.AllowInitialDirectoryFallback &&
+            _repositorySettings.SaveBlockedReason is null && detectedRepoRoot is not null)
         {
             initialSelection = FindRepositoryEntryByPath(detectedRepoRoot);
             if (initialSelection is null)
@@ -75,9 +87,10 @@ internal sealed partial class MainForm : Form
                 ? "已自动定位到当前仓库根目录。"
                 : repositoryLoadWarning;
         }
-        else if (_repositoryEntries.Count > 0)
+        else if (DirectoryPageSelection.Restore(_repositorySettings.ActivePage.LastSelectedDirectoryPath,
+                     _repositoryEntries, entry => entry.RepoRootPath) is { } rememberedEntry)
         {
-            initialSelection = _repositoryEntries[0];
+            initialSelection = rememberedEntry;
             initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
                 ? "已载入最近使用的仓库根目录。"
                 : repositoryLoadWarning;
@@ -106,27 +119,32 @@ internal sealed partial class MainForm : Form
         shellLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
         shellLayout.Controls.Add(CreateSidebar(), 0, 0);
-        shellLayout.Controls.Add(CreatePageHost(initialSelection?.RepoRootPath), 1, 0);
+        shellLayout.Controls.Add(CreatePageHost(initialSelection?.RepoRootPath, suppressInitialDirectoryFallback), 1, 0);
         Controls.Add(shellLayout);
 
         _repositoryNotesSaveTimer.Tick += (_, _) => SaveRepositoryNotes();
         Activated += (_, _) => _ = _repositoryDetails.RefreshBranchAsync();
-        FormClosed += (_, _) => _repositoryNotesSaveTimer.Dispose();
+        _explorerRequestTimer.Tick += (_, _) => ProcessNextExplorerRequest();
+        FormClosed += (_, _) =>
+        {
+            _repositoryNotesSaveTimer.Dispose();
+            _explorerRequestTimer.Dispose();
+            _explorerMenu.Dispose();
+        };
 
         RefreshRepoRootComboBox(selectedRepoRootPath: null);
 
         if (initialSelection is not null)
         {
-            SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false, saveImmediately: false);
-            if (saveLoadedEntries)
-            {
-                RepositoryHistoryStore.Save(_repositorySettings);
-            }
+            SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false,
+                saveImmediately: saveLoadedEntries || _repositorySettings.SaveBlockedReason is null);
         }
         else
         {
             ClearSelectedRepository(initialStatus, initialStatusIsError);
         }
+
+        if (contextMenuWarning is not null) SetStatus(contextMenuWarning, isError: true);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs eventArgs)
@@ -180,13 +198,14 @@ internal sealed partial class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 6,
             BackColor = Color.Transparent
         };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var brandPanel = new TableLayoutPanel
@@ -217,6 +236,15 @@ internal sealed partial class MainForm : Form
         layout.Controls.Add(_repositoryNavigationButton, 0, 1);
         layout.Controls.Add(_scriptRunnerNavigationButton, 0, 2);
         layout.Controls.Add(new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent }, 0, 3);
+        _explorerMenuLink = new LinkLabel
+        {
+            Text = "管理资源管理器右键菜单…",
+            AutoSize = true,
+            MaximumSize = new Size(168, 0),
+            Margin = new Padding(4, 12, 4, 0)
+        };
+        _explorerMenuLink.LinkClicked += (_, _) => ShowExplorerMenuOptions();
+        layout.Controls.Add(_explorerMenuLink, 0, 4);
         layout.Controls.Add(new Label
         {
             Text = "仓库操作与自定义脚本集中管理。",
@@ -224,13 +252,150 @@ internal sealed partial class MainForm : Form
             MaximumSize = new Size(168, 0),
             ForeColor = Color.FromArgb(102, 110, 122),
             Margin = new Padding(4, 14, 4, 0)
-        }, 0, 4);
+        }, 0, 5);
 
         sidebarCard.Controls.Add(layout);
         return sidebarCard;
     }
 
-    private Control CreatePageHost(string? initialRepositoryRootPath)
+    private void ShowExplorerMenuOptions()
+    {
+        var menu = _explorerMenu;
+        if (menu.Items.Count > 0)
+        {
+            menu.Show(_explorerMenuLink, new Point(0, _explorerMenuLink.Height));
+            return;
+        }
+        menu.Items.Add("启用/更新右键菜单", null, (_, _) =>
+        {
+            try
+            {
+                ExplorerContextMenu.Register();
+                MessageBox.Show(this, "文件夹右键菜单已启用。", "资源管理器右键菜单", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "启用失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        });
+        menu.Items.Add("移除右键菜单", null, (_, _) =>
+        {
+            try
+            {
+                ExplorerContextMenu.Unregister();
+                MessageBox.Show(this, "文件夹右键菜单已移除。", "资源管理器右键菜单", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "移除失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        });
+        menu.Show(_explorerMenuLink, new Point(0, _explorerMenuLink.Height));
+    }
+
+    internal void HandleExplorerRequest(string[] args)
+    {
+        if (IsDisposed || Disposing) return;
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show();
+        if (Enabled) Activate();
+        if (args.Length == 0) return;
+        if (!ExplorerAddRequest.TryParse(args, out var request) || request is null) return;
+        _explorerRequests.Enqueue(request);
+        _explorerRequestTimer.Start();
+    }
+
+    private void ProcessNextExplorerRequest()
+    {
+        // List managers own editing snapshots; importing must wait until their dialogs close.
+        if (!Enabled || _handlingExplorerRequest || IsDisposed || Disposing) return;
+        if (!_explorerRequests.TryDequeue(out var request))
+        {
+            _explorerRequestTimer.Stop();
+            return;
+        }
+        _handlingExplorerRequest = true;
+        try
+        {
+            ProcessExplorerRequest(request);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"无法添加目录：{ex.Message}", "添加失败",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _handlingExplorerRequest = false;
+            if (_explorerRequests.Count == 0) _explorerRequestTimer.Stop();
+        }
+    }
+
+    private void ProcessExplorerRequest(ExplorerAddRequest request)
+    {
+        if (!Directory.Exists(request.Path))
+        {
+            MessageBox.Show(this, $"目录不存在或不可访问：{request.Path}", "无法添加目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (request.Target == ExplorerAddTarget.Repository)
+        {
+            AddRepositoryFromExplorer(request.Path);
+            return;
+        }
+
+        ShowPage(_scriptRunnerPage);
+        if (!_scriptRunnerPage.AddDirectoryFromExplorer(request.Path, out var message))
+            MessageBox.Show(this, message, "无法添加执行目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    private void AddRepositoryFromExplorer(string path)
+    {
+        if (!SaveRepositoryNotes()) return;
+        var repositoryRoot = GitPathHelper.FindRepositoryRoot(path);
+        if (repositoryRoot is null)
+        {
+            ShowPage(_repositoryManagementPage);
+            MessageBox.Show(this, "所选目录不属于 Git 仓库，无法添加到仓库管理。", "不是 Git 仓库",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        ShowPage(_repositoryManagementPage);
+        using var dialog = new ExplorerDirectoryTargetForm("仓库管理", repositoryRoot,
+            _repositorySettings.Pages, _repositorySettings.ActivePage.Id);
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedPageId is null) return;
+        if (!SaveRepositoryNotes()) return;
+
+        var normalizedPath = GitPathHelper.NormalizePath(repositoryRoot);
+        var pages = _repositorySettings.Pages.Select(page => page.Clone()).ToList();
+        var page = pages.Single(page => page.Id == dialog.SelectedPageId);
+        var entry = page.Entries.FirstOrDefault(item => string.Equals(
+            item.RepoRootPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            entry = new RepositoryEntry
+            {
+                RepoRootPath = normalizedPath,
+                DisplayOrder = page.Groups.Select(group => group.DisplayOrder)
+                    .Concat(page.Entries.Where(item => string.IsNullOrWhiteSpace(item.GroupId))
+                        .Select(item => item.DisplayOrder)).DefaultIfEmpty(-1).Max() + 1
+            };
+            page.Entries.Add(entry);
+        }
+        page.LastSelectedDirectoryPath = entry.RepoRootPath;
+        var error = ApplyRepositoryDirectoryPages(pages, page.Id);
+        if (error is null)
+        {
+            SetStatus("已从资源管理器添加并选中仓库。", isError: false);
+            return;
+        }
+        MessageBox.Show(this, $"保存仓库配置失败，原配置未更改。{Environment.NewLine}{error}", "添加失败",
+            MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+
+    private Control CreatePageHost(string? initialRepositoryRootPath, bool suppressInitialDirectoryFallback)
     {
         _pageHost = new Panel
         {
@@ -240,7 +405,7 @@ internal sealed partial class MainForm : Form
 
         _repositoryManagementPage = CreateRepositoryManagementPage();
         _repositoryManagementPage.Dock = DockStyle.Fill;
-        _scriptRunnerPage = new ScriptRunnerPage(_launchDirectory, initialRepositoryRootPath)
+        _scriptRunnerPage = new ScriptRunnerPage(_launchDirectory, initialRepositoryRootPath, suppressInitialDirectoryFallback)
         {
             Dock = DockStyle.Fill,
             Visible = false
