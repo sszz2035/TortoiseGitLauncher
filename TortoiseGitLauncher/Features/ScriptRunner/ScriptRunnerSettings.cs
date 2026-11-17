@@ -85,7 +85,7 @@ internal sealed class ExecutionDirectoryGroup : IDirectoryTransferGroup<Executio
     public override string ToString() => Name;
 }
 
-internal sealed class ExecutionDirectoryEntry : IDirectoryTransferEntry<ExecutionDirectoryEntry>
+internal sealed class ExecutionDirectoryEntry : IDirectoryCollectionEntry<ExecutionDirectoryEntry>
 {
     string IDirectoryTransferEntry<ExecutionDirectoryEntry>.TransferPath => DirectoryPath;
 

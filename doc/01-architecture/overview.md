@@ -17,7 +17,7 @@
 `MainForm` 使用 partial class 按页面职责组织：
 
 - `UI/MainForm.cs`：应用外壳、初始化、侧边栏和页面装配。
-- `UI/MainForm.RepositoryManagement.cs`：现有仓库管理页的布局和交互。
+- `UI/RepositoryManagementPage.cs`：独立仓库管理页控件及交互。
 
 partial class 只用于整理现有窗体代码，不代表新的功能都应继续加入 `MainForm`。新页面应优先实现为独立控件或 feature 内部页面，再由主窗体负责导航和生命周期装配。
 

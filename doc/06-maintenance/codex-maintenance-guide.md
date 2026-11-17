@@ -107,7 +107,7 @@
 
 当项目继续变大时，建议优先关注这些事项：
 
-1. 仓库管理页继续增长时，将 `MainForm.RepositoryManagement.cs` 提取为独立 `UserControl`。
+1. 仓库管理页已提取为 `RepositoryManagementPage`；脚本运行会话已拆为 `ScriptRunSessionsControl`。
 2. 为 `ScriptRunnerStore`、路径规范化和运行实例状态转换补充针对性测试。
 3. 验证高输出量、多实例并发、窗口关闭和进程树终止的边界行为。
 4. 只有出现真实复用时，才把 feature 内的进程或配置能力提升为公共服务。

@@ -4,8 +4,151 @@ using System.Windows.Forms;
 
 namespace TortoiseGitLauncher;
 
-internal sealed partial class MainForm : Form
+internal sealed class RepositoryManagementPage : UserControl
 {
+    private readonly string _launchDirectory;
+    private readonly RepositoryHistorySettings _repositorySettings;
+    private List<RepositoryEntry> _repositoryEntries => _repositorySettings.Entries;
+    private string _selectedDirectory;
+    private RepositoryEntry? _selectedRepository;
+    private bool _isUpdatingRepoComboBox;
+    private RepositoryDetailsControl _repositoryDetails = null!;
+    private readonly System.Windows.Forms.Timer _repositoryNotesSaveTimer = new() { Interval = 500 };
+    private bool _repositoryNotesDirty;
+    private ComboBox _repoRootComboBox = null!;
+    private DirectoryPageSelectorButton _repositoryPageSelector = null!;
+    private Button _openRepositoryRootButton = null!;
+    private readonly List<Button> _repositoryCommandButtons = [];
+    private Label _statusValue = null!;
+    private ScriptRunnerPage _scriptRunnerPage = null!;
+    internal void AttachScriptRunnerPage(ScriptRunnerPage page) => _scriptRunnerPage = page;
+    internal string? InitialRepositoryRootPath => _selectedRepository?.RepoRootPath;
+
+    private static readonly CommandButton[] CommandButtons =
+    [
+        new("提交", "commit", CommandScope.WorkingDirectory),
+        new("比较差异", "showcompare", CommandScope.WorkingDirectory),
+        new("日志", "log", CommandScope.WorkingDirectory),
+        new("同步", "sync", CommandScope.RepositoryRoot),
+        new("拉取", "pull", CommandScope.RepositoryRoot),
+        new("推送", "push", CommandScope.RepositoryRoot),
+        new("切换/检出", "switch", CommandScope.RepositoryRoot),
+        new("合并", "merge", CommandScope.RepositoryRoot),
+        new("清理", "cleanup", CommandScope.RepositoryRoot),
+        new("仓库状态", "repostatus", CommandScope.WorkingDirectory),
+        new("还原", "revert", CommandScope.WorkingDirectory),
+        new("解决冲突", "resolve", CommandScope.WorkingDirectory),
+        new("获取", "fetch", CommandScope.RepositoryRoot),
+        new("贮藏", "stashsave", CommandScope.RepositoryRoot),
+        new("弹出贮藏", "stashpop", CommandScope.RepositoryRoot)
+    ];
+
+    private static readonly CommandSection[] CommandSections =
+    [
+        new("提交与更新", Color.FromArgb(59, 130, 246), ["提交", "比较差异", "拉取", "推送", "同步"]),
+        new("管理工作区", Color.FromArgb(34, 197, 94), ["切换/检出", "合并", "清理", "仓库状态", "日志"]),
+        new("处理更改", Color.FromArgb(168, 85, 247), ["还原", "解决冲突", "获取", "贮藏", "弹出贮藏"])
+    ];
+
+    internal RepositoryManagementPage(string launchDirectory, bool suppressInitialDirectoryFallback)
+    {
+        _launchDirectory = launchDirectory;
+        _selectedDirectory = launchDirectory;
+        _repositorySettings = RepositoryHistoryStore.LoadSettings(out var repositoryLoadWarning);
+        Dock = DockStyle.Fill;
+        BackColor = Color.Transparent;
+        Controls.Add(CreateRepositoryManagementPage());
+        _repositoryNotesSaveTimer.Tick += (_, _) => SaveRepositoryNotes();
+
+        var detectedRepoRoot = GitPathHelper.FindRepositoryRoot(_launchDirectory);
+        RepositoryEntry? initialSelection = null;
+        var initialStatus = string.Empty;
+        var initialStatusIsError = false;
+        var saveLoadedEntries = false;
+
+        if (!suppressInitialDirectoryFallback && _repositorySettings.AllowInitialDirectoryFallback &&
+            _repositorySettings.SaveBlockedReason is null && detectedRepoRoot is not null)
+        {
+            initialSelection = FindRepositoryEntryByPath(detectedRepoRoot);
+            if (initialSelection is null)
+            {
+                initialSelection = UpsertRepositoryEntry(detectedRepoRoot, displayName: null, moveToTop: true);
+                saveLoadedEntries = true;
+            }
+
+            initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
+                ? "已自动定位到当前仓库根目录。"
+                : repositoryLoadWarning;
+        }
+        else if (DirectoryPageSelection.Restore(_repositorySettings.ActivePage.LastSelectedDirectoryPath,
+                     _repositoryEntries, entry => entry.RepoRootPath) is { } rememberedEntry)
+        {
+            initialSelection = rememberedEntry;
+            initialStatus = string.IsNullOrWhiteSpace(repositoryLoadWarning)
+                ? "已载入最近使用的仓库根目录。"
+                : repositoryLoadWarning;
+        }
+        else
+        {
+            initialStatus = "当前目录未检测到 Git 仓库。请先选择一个仓库目录。";
+            initialStatusIsError = true;
+        }
+
+        RefreshRepoRootComboBox(selectedRepoRootPath: null);
+        if (initialSelection is not null)
+        {
+            SelectRepositoryEntry(initialSelection, initialStatus, moveToTop: false,
+                saveImmediately: saveLoadedEntries || _repositorySettings.SaveBlockedReason is null);
+        }
+        else
+        {
+            ClearSelectedRepository(initialStatus, initialStatusIsError);
+        }
+        if (!string.IsNullOrWhiteSpace(repositoryLoadWarning)) SetStatus(repositoryLoadWarning, isError: true);
+    }
+
+    internal void RefreshOnActivate() => _ = _repositoryDetails.RefreshBranchAsync();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _repositoryNotesSaveTimer.Dispose();
+        base.Dispose(disposing);
+    }
+
+    private Control CreateRepositoryManagementPage()
+    {
+        var scrollPanel = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            BackColor = Color.Transparent
+        };
+
+        var contentLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0)
+        };
+
+        contentLayout.Controls.Add(CreatePageHeaderCard());
+        contentLayout.Controls.Add(CreateRepositorySelectionCard());
+
+        foreach (var section in CommandSections)
+        {
+            contentLayout.Controls.Add(CreateCommandSectionCard(section));
+        }
+
+        contentLayout.Controls.Add(CreateFooterCard());
+        contentLayout.Layout += (_, _) => SyncScrollPanelExtent(scrollPanel, contentLayout);
+        scrollPanel.SizeChanged += (_, _) => SyncScrollPanelExtent(scrollPanel, contentLayout);
+        SyncScrollPanelExtent(scrollPanel, contentLayout);
+        scrollPanel.Controls.Add(contentLayout);
+        return scrollPanel;
+    }
     private Control CreatePageHeaderCard()
     {
         var card = CreateCardPanel(new Padding(22, 18, 22, 18));
@@ -22,7 +165,7 @@ internal sealed partial class MainForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-        layout.Controls.Add(CreateIconBox(UiIconKind.Brand, Color.FromArgb(46, 118, 255), 52, Color.FromArgb(236, 244, 255)), 0, 0);
+        layout.Controls.Add(MainForm.CreateIconBox(UiIconKind.Brand, Color.FromArgb(46, 118, 255), 52, Color.FromArgb(236, 244, 255)), 0, 0);
 
         var textLayout = new TableLayoutPanel
         {
@@ -614,7 +757,7 @@ internal sealed partial class MainForm : Form
         foreach (var button in _repositoryCommandButtons) button.Enabled = available;
     }
 
-    private bool SaveRepositoryNotes()
+    internal bool SaveRepositoryNotes()
     {
         _repositoryNotesSaveTimer.Stop();
         if (!_repositoryNotesDirty)
@@ -846,11 +989,119 @@ internal sealed partial class MainForm : Form
         }
     }
 
-    private void SetStatus(string message, bool isError)
+    internal void SetStatus(string message, bool isError)
     {
         _statusValue.Text = message;
         _statusValue.ForeColor = isError
             ? Color.FromArgb(180, 45, 30)
             : Color.FromArgb(23, 112, 41);
+    }
+
+    private void SwitchRepositoryDirectoryPage(string id)
+    {
+        if (string.Equals(id, _repositorySettings.ActivePage.Id, StringComparison.OrdinalIgnoreCase) ||
+            !SaveRepositoryNotes()) return;
+
+        var error = ApplyRepositoryDirectoryPages(_repositorySettings.Pages, id);
+        if (error is not null)
+        {
+            SetStatus($"切换目录页失败：{error}", isError: true);
+            MessageBox.Show(this, error, "无法保存目录页", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OpenRepositoryPageManager()
+    {
+        if (!SaveRepositoryNotes()) return;
+        using var dialog = new DirectoryPageManagerForm<RepositoryDirectoryPage>(
+            "仓库管理", _repositorySettings.Pages, _repositorySettings.ActivePage.Id,
+            page => page.Clone(), ApplyRepositoryDirectoryPages);
+        dialog.ShowDialog(this);
+    }
+
+    // Save a candidate first, so failed writes cannot replace the active page or its notes.
+    private string? ApplyRepositoryDirectoryPages(List<RepositoryDirectoryPage> pages, string selectedId)
+    {
+        var candidate = _repositorySettings.Clone();
+        candidate.Pages = pages.Select(page => page.Clone()).ToList();
+        candidate.LastSelectedPageId = selectedId;
+        candidate.AllowInitialDirectoryFallback = false;
+        var selected = DirectoryPageSelection.Restore(candidate.ActivePage.LastSelectedDirectoryPath,
+            candidate.Entries, entry => entry.RepoRootPath);
+        candidate.ActivePage.LastSelectedDirectoryPath = selected?.RepoRootPath ?? string.Empty;
+        if (!RepositoryHistoryStore.TrySave(candidate, out var errorMessage)) return errorMessage ?? "保存失败。";
+
+        _repositorySettings.Pages = candidate.Pages;
+        _repositorySettings.LastSelectedPageId = candidate.LastSelectedPageId;
+        _repositorySettings.AllowInitialDirectoryFallback = false;
+        RestoreRepositoryDirectoryPage();
+        return null;
+    }
+
+    private void RestoreRepositoryDirectoryPage()
+    {
+        _repositoryPageSelector.SetPages(_repositorySettings.Pages, _repositorySettings.ActivePage.Id);
+        var selected = DirectoryPageSelection.Restore(_repositorySettings.ActivePage.LastSelectedDirectoryPath,
+            _repositoryEntries, entry => entry.RepoRootPath);
+        if (selected is null)
+        {
+            ClearSelectedRepository($"目录页“{_repositorySettings.ActivePage.Name}”没有可用仓库，请选择仓库目录。", isError: true);
+        }
+        else
+        {
+            SelectRepositoryEntry(selected, $"已切换到目录页“{_repositorySettings.ActivePage.Name}”。",
+                moveToTop: false, saveImmediately: false);
+        }
+    }
+    internal void AddRepositoryFromExplorer(string path)
+    {
+        if (!SaveRepositoryNotes()) return;
+        var repositoryRoot = GitPathHelper.FindRepositoryRoot(path);
+        if (repositoryRoot is null)
+        {
+            MessageBox.Show(this, "所选目录不属于 Git 仓库，无法添加到仓库管理。", "不是 Git 仓库",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        using var dialog = new ExplorerDirectoryTargetForm("仓库管理", repositoryRoot,
+            _repositorySettings.Pages, _repositorySettings.ActivePage.Id);
+        if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedPageId is null) return;
+        if (!SaveRepositoryNotes()) return;
+
+        var normalizedPath = GitPathHelper.NormalizePath(repositoryRoot);
+        var pages = _repositorySettings.Pages.Select(page => page.Clone()).ToList();
+        var page = pages.Single(page => page.Id == dialog.SelectedPageId);
+        var entry = page.Entries.FirstOrDefault(item => string.Equals(
+            item.RepoRootPath, normalizedPath, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            entry = new RepositoryEntry
+            {
+                RepoRootPath = normalizedPath,
+                DisplayOrder = page.Groups.Select(group => group.DisplayOrder)
+                    .Concat(page.Entries.Where(item => string.IsNullOrWhiteSpace(item.GroupId))
+                        .Select(item => item.DisplayOrder)).DefaultIfEmpty(-1).Max() + 1
+            };
+            page.Entries.Add(entry);
+        }
+        page.LastSelectedDirectoryPath = entry.RepoRootPath;
+        var error = ApplyRepositoryDirectoryPages(pages, page.Id);
+        if (error is null)
+        {
+            SetStatus("已从资源管理器添加并选中仓库。", isError: false);
+            return;
+        }
+        MessageBox.Show(this, $"保存仓库配置失败，原配置未更改。{Environment.NewLine}{error}", "添加失败",
+            MessageBoxButtons.OK, MessageBoxIcon.Error);
+    }
+    private static void SyncScrollPanelExtent(Panel scrollPanel, Control content)
+    {
+        content.PerformLayout();
+        var contentHeight = content.GetPreferredSize(new Size(scrollPanel.ClientSize.Width, 0)).Height;
+        if (contentHeight <= 0) contentHeight = content.Bottom;
+        scrollPanel.AutoScrollMinSize = new Size(0, contentHeight);
+        var maxScrollY = Math.Max(0, contentHeight - scrollPanel.ClientSize.Height);
+        var currentScrollY = Math.Max(0, -scrollPanel.AutoScrollPosition.Y);
+        if (currentScrollY > maxScrollY) scrollPanel.AutoScrollPosition = new Point(0, maxScrollY);
     }
 }
