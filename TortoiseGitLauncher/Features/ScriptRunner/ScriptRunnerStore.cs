@@ -158,7 +158,7 @@ internal static class ScriptRunnerStore
                     continue;
                 }
 
-                group.Id = EnsureUniqueGuid(group.Id, usedIds);
+                group.Id = DirectoryCollectionNormalizer.EnsureUniqueId(group.Id, usedIds);
                 group.Name = string.IsNullOrWhiteSpace(group.Name)
                     ? "未命名组"
                     : group.Name.Trim();
@@ -341,92 +341,13 @@ internal static class ScriptRunnerStore
     {
         settings.DirectoryGroups ??= [];
         settings.RecentDirectories ??= [];
-
-        var usedGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var usedGroupNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (var index = 0; index < settings.DirectoryGroups.Count; index++)
-        {
-            var group = settings.DirectoryGroups[index];
-            group.Id = EnsureUniqueGuid(group.Id, usedGroupIds);
-            group.Name = EnsureUniqueGroupName(group.Name, usedGroupNames);
-        }
-
-        var knownGroupIds = settings.DirectoryGroups
-            .Select(group => group.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalizedEntries = new List<ExecutionDirectoryEntry>();
-        var orderedSourceEntries = settings.RecentDirectories
-            .Select((entry, sourceIndex) => (Entry: entry, SourceIndex: sourceIndex))
-            .OrderBy(item => item.Entry?.DisplayOrder ?? int.MaxValue)
-            .ThenBy(item => item.SourceIndex)
-            .ToList();
-        foreach (var sourceEntry in orderedSourceEntries)
-        {
-            var entry = sourceEntry.Entry;
-            if (entry is null || string.IsNullOrWhiteSpace(entry.DirectoryPath))
-            {
-                continue;
-            }
-
-            try
-            {
-                entry.DirectoryPath = ScriptRunnerPathHelper.NormalizeDirectoryPath(entry.DirectoryPath);
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (!uniquePaths.Add(entry.DirectoryPath))
-            {
-                continue;
-            }
-
-            entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
-            entry.Notes ??= string.Empty;
-            entry.GroupId = !string.IsNullOrWhiteSpace(entry.GroupId) &&
-                            knownGroupIds.Contains(entry.GroupId)
-                ? entry.GroupId
-                : null;
-            normalizedEntries.Add(entry);
-        }
-
-        settings.RecentDirectories.Clear();
-        settings.RecentDirectories.AddRange(normalizedEntries);
-    }
-    private static string EnsureUniqueGroupName(
-        string? value,
-        HashSet<string> usedNames)
-    {
-        var baseName = string.IsNullOrWhiteSpace(value)
-            ? "未命名组"
-            : value.Trim();
-        var candidate = baseName;
-        var suffix = 2;
-        while (!usedNames.Add(candidate))
-        {
-            candidate = $"{baseName} ({suffix})";
-            suffix++;
-        }
-
-        return candidate;
+        DirectoryCollectionNormalizer.NormalizeGroups(settings.DirectoryGroups);
+        DirectoryCollectionNormalizer.NormalizeEntries(settings.RecentDirectories, settings.DirectoryGroups,
+            entry => entry.DirectoryPath,
+            (entry, path) => entry.DirectoryPath = path,
+            ScriptRunnerPathHelper.NormalizeDirectoryPath);
     }
 
-    private static string EnsureUniqueGuid(
-        string? value,
-        HashSet<string> usedIds)
-    {
-        var candidate = Guid.TryParse(value, out var parsed)
-            ? parsed.ToString("D")
-            : Guid.NewGuid().ToString("D");
-        while (!usedIds.Add(candidate))
-        {
-            candidate = Guid.NewGuid().ToString("D");
-        }
-
-        return candidate;
-    }
     private static void NormalizeScriptOrder(IList<ScriptConfiguration> scripts)
     {
         for (var index = 0; index < scripts.Count; index++)

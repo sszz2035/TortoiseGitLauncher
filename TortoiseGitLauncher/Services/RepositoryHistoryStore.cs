@@ -167,7 +167,7 @@ internal static class RepositoryHistoryStore
                     continue;
                 }
 
-                group.Id = EnsureUniqueGuid(group.Id, usedIds);
+                group.Id = DirectoryCollectionNormalizer.EnsureUniqueId(group.Id, usedIds);
                 group.Name = string.IsNullOrWhiteSpace(group.Name)
                     ? "未命名组"
                     : group.Name.Trim();
@@ -294,90 +294,11 @@ internal static class RepositoryHistoryStore
     {
         settings.Groups ??= [];
         settings.Entries ??= [];
-
-        var usedGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var usedGroupNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (var index = 0; index < settings.Groups.Count; index++)
-        {
-            var group = settings.Groups[index];
-            group.Id = EnsureUniqueGuid(group.Id, usedGroupIds);
-            group.Name = EnsureUniqueGroupName(group.Name, usedGroupNames);
-        }
-
-        var knownGroupIds = settings.Groups
-            .Select(group => group.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var uniquePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var normalizedEntries = new List<RepositoryEntry>();
-        var orderedSourceEntries = settings.Entries
-            .Select((entry, sourceIndex) => (Entry: entry, SourceIndex: sourceIndex))
-            .OrderBy(item => item.Entry?.DisplayOrder ?? int.MaxValue)
-            .ThenBy(item => item.SourceIndex)
-            .ToList();
-        foreach (var sourceEntry in orderedSourceEntries)
-        {
-            var entry = sourceEntry.Entry;
-            if (entry is null || string.IsNullOrWhiteSpace(entry.RepoRootPath))
-            {
-                continue;
-            }
-
-            try
-            {
-                entry.RepoRootPath = GitPathHelper.NormalizePath(entry.RepoRootPath);
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (!uniquePaths.Add(entry.RepoRootPath))
-            {
-                continue;
-            }
-
-            entry.DisplayName = entry.DisplayName?.Trim() ?? string.Empty;
-            entry.Notes ??= string.Empty;
-            entry.GroupId = !string.IsNullOrWhiteSpace(entry.GroupId) &&
-                            knownGroupIds.Contains(entry.GroupId)
-                ? entry.GroupId
-                : null;
-            normalizedEntries.Add(entry);
-        }
-
-        settings.Entries.Clear();
-        settings.Entries.AddRange(normalizedEntries);
-    }
-    private static string EnsureUniqueGroupName(
-        string? value,
-        HashSet<string> usedNames)
-    {
-        var baseName = string.IsNullOrWhiteSpace(value)
-            ? "未命名组"
-            : value.Trim();
-        var candidate = baseName;
-        var suffix = 2;
-        while (!usedNames.Add(candidate))
-        {
-            candidate = $"{baseName} ({suffix})";
-            suffix++;
-        }
-
-        return candidate;
-    }
-    private static string EnsureUniqueGuid(
-        string? value,
-        HashSet<string> usedIds)
-    {
-        var candidate = Guid.TryParse(value, out var parsed)
-            ? parsed.ToString("D")
-            : Guid.NewGuid().ToString("D");
-        while (!usedIds.Add(candidate))
-        {
-            candidate = Guid.NewGuid().ToString("D");
-        }
-
-        return candidate;
+        DirectoryCollectionNormalizer.NormalizeGroups(settings.Groups);
+        DirectoryCollectionNormalizer.NormalizeEntries(settings.Entries, settings.Groups,
+            entry => entry.RepoRootPath,
+            (entry, path) => entry.RepoRootPath = path,
+            GitPathHelper.NormalizePath);
     }
 
     private static string? BuildWarning(int skippedEntries, bool migrated)

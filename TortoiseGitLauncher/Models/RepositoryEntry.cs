@@ -76,7 +76,7 @@ internal sealed class RepositoryGroup : IDirectoryTransferGroup<RepositoryGroup>
     public override string ToString() => Name;
 }
 
-internal sealed class RepositoryEntry : IDirectoryTransferEntry<RepositoryEntry>
+internal sealed class RepositoryEntry : IDirectoryCollectionEntry<RepositoryEntry>
 {
     string IDirectoryTransferEntry<RepositoryEntry>.TransferPath => RepoRootPath;
 

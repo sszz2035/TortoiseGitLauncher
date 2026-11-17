@@ -11,5 +11,4 @@
 
 ## 待观察
 
-- `MainForm.RepositoryManagement.cs` 仍然是较大的现有页面实现。只要行为稳定可以维持；若仓库页面继续增长，应提取为独立 `UserControl`，不要继续扩大 partial class。
 - 脚本执行已将进程生命周期放在 `ScriptProcessRunner`，后台输出只写入线程安全的 `ScriptRunInstance`，页面通过 `BeginInvoke` 和定时批量刷新 UI。后续需继续观察高输出量、多实例并发及关闭窗口时的性能与竞态。

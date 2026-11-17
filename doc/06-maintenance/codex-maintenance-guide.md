@@ -86,6 +86,33 @@
 - 仓库历史变化更新 `04-data/repository-history.md`。
 - 脚本执行配置变化更新 `04-data/script-runner-settings.md`。
 
+## Git 提交信息规范
+
+提交信息必须使用中文描述；类型前缀是固定英文标记，除此之外的摘要和正文均使用中文。标题格式为：
+
+```text
+<type>: <中文摘要>
+```
+
+常用类型前缀：
+
+- `feat`：新增或扩展功能。
+- `fix`：修复缺陷。
+- `refactor`：重构，不改变外部行为。
+- `docs`：仅修改文档。
+- `test`：新增或调整测试。
+- `build`：构建、发布或依赖配置变更。
+- `perf`：性能优化。
+- `chore`：其他维护性工作。
+
+摘要应简洁说明本次改动，正文（如有）也使用中文。示例：
+
+```text
+refactor: 拆分脚本运行会话控件
+fix: 修复目录排序未保存的问题
+feat: 增加仓库分组管理
+```
+
 ## 构建和验证
 
 当前项目提供 `build.ps1`，用于发布到 `dist/`。
@@ -107,7 +134,7 @@
 
 当项目继续变大时，建议优先关注这些事项：
 
-1. 仓库管理页继续增长时，将 `MainForm.RepositoryManagement.cs` 提取为独立 `UserControl`。
+1. 仓库管理页已提取为 `RepositoryManagementPage`；脚本运行会话已拆为 `ScriptRunSessionsControl`。
 2. 为 `ScriptRunnerStore`、路径规范化和运行实例状态转换补充针对性测试。
 3. 验证高输出量、多实例并发、窗口关闭和进程树终止的边界行为。
 4. 只有出现真实复用时，才把 feature 内的进程或配置能力提升为公共服务。

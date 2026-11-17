@@ -9,6 +9,12 @@ internal interface IDirectoryTransferEntry<TEntry>
     TEntry Clone();
 }
 
+internal interface IDirectoryCollectionEntry<TEntry> : IDirectoryTransferEntry<TEntry>
+{
+    string DisplayName { get; set; }
+    string Notes { get; set; }
+}
+
 internal interface IDirectoryTransferGroup<TGroup>
 {
     string Id { get; set; }
